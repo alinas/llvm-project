@@ -105,7 +105,18 @@ static size_t getNewCapacity(size_t MinSize, size_t TSize, size_t OldCapacity) {
   // In theory 2*capacity can overflow if the capacity is 64 bit, but the
   // original capacity would never be large enough for this to be a problem.
   size_t NewCapacity = 2 * OldCapacity + 1; // Always grow.
-  return std::min(std::max(NewCapacity, MinSize), MaxSize);
+  return std::clamp(NewCapacity, MinSize, MaxSize);
+}
+
+template <class Size_T>
+void *SmallVectorBase<Size_T>::replaceAllocation(void *NewElts, size_t TSize,
+                                                 size_t NewCapacity,
+                                                 size_t VSize) {
+  void *NewEltsReplace = llvm::safe_malloc(NewCapacity * TSize);
+  if (VSize)
+    memcpy(NewEltsReplace, NewElts, VSize * TSize);
+  free(NewElts);
+  return NewEltsReplace;
 }
 
 template <class Size_T>

@@ -51,8 +51,7 @@ class HexagonAsmBackend : public MCAsmBackend {
                           MCInst &HMB) const {
     SmallVector<MCFixup, 4> Fixups;
     SmallString<256> Code;
-    raw_svector_ostream VecOS(Code);
-    E.encodeInstruction(HMB, VecOS, Fixups, *RF.getSubtargetInfo());
+    E.encodeInstruction(HMB, Code, Fixups, *RF.getSubtargetInfo());
 
     // Update the fragment.
     RF.setInst(HMB);
@@ -713,7 +712,7 @@ public:
 
   void finishLayout(MCAssembler const &Asm,
                     MCAsmLayout &Layout) const override {
-    for (auto I : Layout.getSectionOrder()) {
+    for (auto *I : Layout.getSectionOrder()) {
       auto &Fragments = I->getFragmentList();
       for (auto &J : Fragments) {
         switch (J.getKind()) {

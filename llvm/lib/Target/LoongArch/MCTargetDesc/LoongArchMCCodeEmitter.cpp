@@ -39,13 +39,14 @@ public:
 
   ~LoongArchMCCodeEmitter() override {}
 
-  void encodeInstruction(const MCInst &MI, raw_ostream &OS,
+  void encodeInstruction(const MCInst &MI, SmallVectorImpl<char> &CB,
                          SmallVectorImpl<MCFixup> &Fixups,
                          const MCSubtargetInfo &STI) const override;
 
-  void expandFunctionCall(const MCInst &MI, raw_ostream &OS,
-                          SmallVectorImpl<MCFixup> &Fixups,
-                          const MCSubtargetInfo &STI) const;
+  template <unsigned Opc>
+  void expandToVectorLDI(const MCInst &MI, SmallVectorImpl<char> &CB,
+                         SmallVectorImpl<MCFixup> &Fixups,
+                         const MCSubtargetInfo &STI) const;
 
   /// TableGen'erated function for getting the binary encoding for an
   /// instruction.
@@ -69,12 +70,21 @@ public:
 
   /// Return binary encoding of an immediate operand specified by OpNo.
   /// The value returned is the value of the immediate shifted right
-  //  arithmetically by 2.
+  //  arithmetically by N.
   /// Note that this function is dedicated to specific immediate types,
   /// e.g. simm14_lsl2, simm16_lsl2, simm21_lsl2 and simm26_lsl2.
-  unsigned getImmOpValueAsr2(const MCInst &MI, unsigned OpNo,
-                             SmallVectorImpl<MCFixup> &Fixups,
-                             const MCSubtargetInfo &STI) const;
+  template <unsigned N>
+  unsigned getImmOpValueAsr(const MCInst &MI, unsigned OpNo,
+                            SmallVectorImpl<MCFixup> &Fixups,
+                            const MCSubtargetInfo &STI) const {
+    const MCOperand &MO = MI.getOperand(OpNo);
+    if (MO.isImm()) {
+      unsigned Res = MI.getOperand(OpNo).getImm();
+      assert((Res & ((1U << N) - 1U)) == 0 && "lowest N bits are non-zero");
+      return Res >> N;
+    }
+    return getExprOpValue(MI, MO, Fixups, STI);
+  }
 
   unsigned getExprOpValue(const MCInst &MI, const MCOperand &MO,
                           SmallVectorImpl<MCFixup> &Fixups,
@@ -106,21 +116,6 @@ LoongArchMCCodeEmitter::getImmOpValueSub1(const MCInst &MI, unsigned OpNo,
 }
 
 unsigned
-LoongArchMCCodeEmitter::getImmOpValueAsr2(const MCInst &MI, unsigned OpNo,
-                                          SmallVectorImpl<MCFixup> &Fixups,
-                                          const MCSubtargetInfo &STI) const {
-  const MCOperand &MO = MI.getOperand(OpNo);
-
-  if (MO.isImm()) {
-    unsigned Res = MI.getOperand(OpNo).getImm();
-    assert((Res & 3) == 0 && "lowest 2 bits are non-zero");
-    return Res >> 2;
-  }
-
-  return getExprOpValue(MI, MO, Fixups, STI);
-}
-
-unsigned
 LoongArchMCCodeEmitter::getExprOpValue(const MCInst &MI, const MCOperand &MO,
                                        SmallVectorImpl<MCFixup> &Fixups,
                                        const MCSubtargetInfo &STI) const {
@@ -135,14 +130,135 @@ LoongArchMCCodeEmitter::getExprOpValue(const MCInst &MI, const MCOperand &MO,
     case LoongArchMCExpr::VK_LoongArch_None:
     case LoongArchMCExpr::VK_LoongArch_Invalid:
       llvm_unreachable("Unhandled fixup kind!");
-    case LoongArchMCExpr::VK_LoongArch_PCREL_HI:
-      FixupKind = LoongArch::fixup_loongarch_pcala_hi20;
+    case LoongArchMCExpr::VK_LoongArch_B16:
+      FixupKind = LoongArch::fixup_loongarch_b16;
       break;
-    case LoongArchMCExpr::VK_LoongArch_PCREL_LO:
-      FixupKind = LoongArch::fixup_loongarch_pcala_lo12;
+    case LoongArchMCExpr::VK_LoongArch_B21:
+      FixupKind = LoongArch::fixup_loongarch_b21;
       break;
+    case LoongArchMCExpr::VK_LoongArch_B26:
     case LoongArchMCExpr::VK_LoongArch_CALL:
     case LoongArchMCExpr::VK_LoongArch_CALL_PLT:
+      FixupKind = LoongArch::fixup_loongarch_b26;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_ABS_HI20:
+      FixupKind = LoongArch::fixup_loongarch_abs_hi20;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_ABS_LO12:
+      FixupKind = LoongArch::fixup_loongarch_abs_lo12;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_ABS64_LO20:
+      FixupKind = LoongArch::fixup_loongarch_abs64_lo20;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_ABS64_HI12:
+      FixupKind = LoongArch::fixup_loongarch_abs64_hi12;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_PCALA_HI20:
+      FixupKind = LoongArch::fixup_loongarch_pcala_hi20;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_PCALA_LO12:
+      FixupKind = LoongArch::fixup_loongarch_pcala_lo12;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_PCALA64_LO20:
+      FixupKind = LoongArch::fixup_loongarch_pcala64_lo20;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_PCALA64_HI12:
+      FixupKind = LoongArch::fixup_loongarch_pcala64_hi12;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_GOT_PC_HI20:
+      FixupKind = LoongArch::fixup_loongarch_got_pc_hi20;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_GOT_PC_LO12:
+      FixupKind = LoongArch::fixup_loongarch_got_pc_lo12;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_GOT64_PC_LO20:
+      FixupKind = LoongArch::fixup_loongarch_got64_pc_lo20;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_GOT64_PC_HI12:
+      FixupKind = LoongArch::fixup_loongarch_got64_pc_hi12;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_GOT_HI20:
+      FixupKind = LoongArch::fixup_loongarch_got_hi20;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_GOT_LO12:
+      FixupKind = LoongArch::fixup_loongarch_got_lo12;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_GOT64_LO20:
+      FixupKind = LoongArch::fixup_loongarch_got64_lo20;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_GOT64_HI12:
+      FixupKind = LoongArch::fixup_loongarch_got64_hi12;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_TLS_LE_HI20:
+      FixupKind = LoongArch::fixup_loongarch_tls_le_hi20;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_TLS_LE_LO12:
+      FixupKind = LoongArch::fixup_loongarch_tls_le_lo12;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_TLS_LE64_LO20:
+      FixupKind = LoongArch::fixup_loongarch_tls_le64_lo20;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_TLS_LE64_HI12:
+      FixupKind = LoongArch::fixup_loongarch_tls_le64_hi12;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_TLS_IE_PC_HI20:
+      FixupKind = LoongArch::fixup_loongarch_tls_ie_pc_hi20;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_TLS_IE_PC_LO12:
+      FixupKind = LoongArch::fixup_loongarch_tls_ie_pc_lo12;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_TLS_IE64_PC_LO20:
+      FixupKind = LoongArch::fixup_loongarch_tls_ie64_pc_lo20;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_TLS_IE64_PC_HI12:
+      FixupKind = LoongArch::fixup_loongarch_tls_ie64_pc_hi12;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_TLS_IE_HI20:
+      FixupKind = LoongArch::fixup_loongarch_tls_ie_hi20;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_TLS_IE_LO12:
+      FixupKind = LoongArch::fixup_loongarch_tls_ie_lo12;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_TLS_IE64_LO20:
+      FixupKind = LoongArch::fixup_loongarch_tls_ie64_lo20;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_TLS_IE64_HI12:
+      FixupKind = LoongArch::fixup_loongarch_tls_ie64_hi12;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_TLS_LD_PC_HI20:
+      FixupKind = LoongArch::fixup_loongarch_tls_ld_pc_hi20;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_TLS_LD_HI20:
+      FixupKind = LoongArch::fixup_loongarch_tls_ld_hi20;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_TLS_GD_PC_HI20:
+      FixupKind = LoongArch::fixup_loongarch_tls_gd_pc_hi20;
+      break;
+    case LoongArchMCExpr::VK_LoongArch_TLS_GD_HI20:
+      FixupKind = LoongArch::fixup_loongarch_tls_gd_hi20;
+      break;
+    }
+  } else if (Kind == MCExpr::SymbolRef &&
+             cast<MCSymbolRefExpr>(Expr)->getKind() ==
+                 MCSymbolRefExpr::VK_None) {
+    switch (MI.getOpcode()) {
+    default:
+      break;
+    case LoongArch::BEQ:
+    case LoongArch::BNE:
+    case LoongArch::BLT:
+    case LoongArch::BGE:
+    case LoongArch::BLTU:
+    case LoongArch::BGEU:
+      FixupKind = LoongArch::fixup_loongarch_b16;
+      break;
+    case LoongArch::BEQZ:
+    case LoongArch::BNEZ:
+    case LoongArch::BCEQZ:
+    case LoongArch::BCNEZ:
+      FixupKind = LoongArch::fixup_loongarch_b21;
+      break;
+    case LoongArch::B:
       FixupKind = LoongArch::fixup_loongarch_b26;
       break;
     }
@@ -156,33 +272,61 @@ LoongArchMCCodeEmitter::getExprOpValue(const MCInst &MI, const MCOperand &MO,
   return 0;
 }
 
-void LoongArchMCCodeEmitter::expandFunctionCall(
-    const MCInst &MI, raw_ostream &OS, SmallVectorImpl<MCFixup> &Fixups,
-    const MCSubtargetInfo &STI) const {
-  MCOperand Func = MI.getOperand(0);
-  MCInst TmpInst = Func.isExpr()
-                       ? MCInstBuilder(LoongArch::BL).addExpr(Func.getExpr())
-                       : MCInstBuilder(LoongArch::BL).addImm(Func.getImm());
+template <unsigned Opc>
+void LoongArchMCCodeEmitter::expandToVectorLDI(
+    const MCInst &MI, SmallVectorImpl<char> &CB,
+    SmallVectorImpl<MCFixup> &Fixups, const MCSubtargetInfo &STI) const {
+  int64_t Imm = MI.getOperand(1).getImm() & 0x3FF;
+  switch (MI.getOpcode()) {
+  case LoongArch::PseudoVREPLI_B:
+  case LoongArch::PseudoXVREPLI_B:
+    break;
+  case LoongArch::PseudoVREPLI_H:
+  case LoongArch::PseudoXVREPLI_H:
+    Imm |= 0x400;
+    break;
+  case LoongArch::PseudoVREPLI_W:
+  case LoongArch::PseudoXVREPLI_W:
+    Imm |= 0x800;
+    break;
+  case LoongArch::PseudoVREPLI_D:
+  case LoongArch::PseudoXVREPLI_D:
+    Imm |= 0xC00;
+    break;
+  }
+  MCInst TmpInst = MCInstBuilder(Opc).addOperand(MI.getOperand(0)).addImm(Imm);
   uint32_t Binary = getBinaryCodeForInstr(TmpInst, Fixups, STI);
-  support::endian::write(OS, Binary, support::little);
+  support::endian::write(CB, Binary, support::little);
 }
 
 void LoongArchMCCodeEmitter::encodeInstruction(
-    const MCInst &MI, raw_ostream &OS, SmallVectorImpl<MCFixup> &Fixups,
-    const MCSubtargetInfo &STI) const {
+    const MCInst &MI, SmallVectorImpl<char> &CB,
+    SmallVectorImpl<MCFixup> &Fixups, const MCSubtargetInfo &STI) const {
   const MCInstrDesc &Desc = MCII.get(MI.getOpcode());
   // Get byte count of instruction.
   unsigned Size = Desc.getSize();
 
-  if (MI.getOpcode() == LoongArch::PseudoCALL)
-    return expandFunctionCall(MI, OS, Fixups, STI);
+  switch (MI.getOpcode()) {
+  default:
+    break;
+  case LoongArch::PseudoVREPLI_B:
+  case LoongArch::PseudoVREPLI_H:
+  case LoongArch::PseudoVREPLI_W:
+  case LoongArch::PseudoVREPLI_D:
+    return expandToVectorLDI<LoongArch::VLDI>(MI, CB, Fixups, STI);
+  case LoongArch::PseudoXVREPLI_B:
+  case LoongArch::PseudoXVREPLI_H:
+  case LoongArch::PseudoXVREPLI_W:
+  case LoongArch::PseudoXVREPLI_D:
+    return expandToVectorLDI<LoongArch::XVLDI>(MI, CB, Fixups, STI);
+  }
 
   switch (Size) {
   default:
     llvm_unreachable("Unhandled encodeInstruction length!");
   case 4: {
     uint32_t Bits = getBinaryCodeForInstr(MI, Fixups, STI);
-    support::endian::write(OS, Bits, support::little);
+    support::endian::write(CB, Bits, support::little);
     break;
   }
   }

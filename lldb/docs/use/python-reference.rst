@@ -10,9 +10,6 @@ command interpreter (we refer to this for brevity as the embedded interpreter).
 Of course, in this context it has full access to the LLDB API - with some
 additional conveniences we will call out in the FAQ.
 
-.. contents::
-   :local:
-
 Documentation
 --------------
 
@@ -608,7 +605,7 @@ look like:
 
       # Finally, dispose of the debugger you just made.
       lldb.SBDebugger.Destroy(debugger)
-      # Terminate the debug sesssion
+      # Terminate the debug session
       lldb.SBDebugger.Terminate()
 
 
@@ -860,7 +857,8 @@ functions 'read', 'write' and 'close' follows:
     def get_recognized_arguments(self, frame):
       if frame.name in ["read", "write", "close"]:
         fd = frame.EvaluateExpression("$arg1").unsigned
-        value = lldb.target.CreateValueFromExpression("fd", "(int)%d" % fd)
+        target = frame.thread.process.target
+        value = target.CreateValueFromExpression("fd", "(int)%d" % fd)
         return [value]
       return []
 

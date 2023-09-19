@@ -1,5 +1,5 @@
-; RUN: opt -disable-output -passes='print-access-info' %s 2>&1 | FileCheck %s
-; RUN: opt -disable-output -passes='print-access-info' -max-forked-scev-depth=2 %s 2>&1 | FileCheck -check-prefix=RECURSE %s
+; RUN: opt -disable-output -passes='print<access-info>' %s 2>&1 | FileCheck %s
+; RUN: opt -disable-output -passes='print<access-info>' -max-forked-scev-depth=2 %s 2>&1 | FileCheck -check-prefix=RECURSE %s
 
 target datalayout = "e-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128"
 
@@ -569,13 +569,13 @@ for.body:                                         ; preds = %entry, %for.body
 ; CHECK-NEXT:      Against group ([[G2:.+]]):
 ; CHECK-NEXT:        %arrayidx = getelementptr inbounds i32, ptr %Preds, i64 %indvars.iv
 ; CHECK-NEXT:    Check 1:
-; CHECK-NEXT:      Comparing group ([[G1:.+]]):
+; CHECK-NEXT:      Comparing group ([[G1]]):
 ; CHECK-NEXT:        %arrayidx5 = getelementptr inbounds float, ptr %Dest, i64 %indvars.iv
 ; CHECK-NEXT:      Against group ([[G3:.+]]):
 ; CHECK-NEXT:        %arrayidx3 = getelementptr inbounds float, ptr %Base, i64 %offset
 ; CHECK-NEXT:        %arrayidx3 = getelementptr inbounds float, ptr %Base, i64 %offset
 ; CHECK-NEXT:    Grouped accesses:
-; CHECK-NEXT:      Group [[G1:.+]]:
+; CHECK-NEXT:      Group [[G1]]:
 ; CHECK-NEXT:        (Low: %Dest High: (400 + %Dest))
 ; CHECK-NEXT:          Member: {%Dest,+,4}<nuw><%for.body>
 ; CHECK-NEXT:      Group [[G2]]:
@@ -878,5 +878,184 @@ for.body:
   br i1 %exitcond.not, label %for.cond.cleanup, label %for.body
 
 for.cond.cleanup:
+  ret void
+}
+
+; CHECK-LABEL: Loop access info in function 'sc_add_expr_ice':
+; CHECK-NEXT:   for.body:
+; CHECK-NEXT:     Memory dependences are safe with run-time checks
+; CHECK-NEXT:     Dependences:
+; CHECK-NEXT:     Run-time memory checks:
+; CHECK-NEXT:     Check 0:
+; CHECK-NEXT:       Comparing group ([[G1:.+]]):
+; CHECK-NEXT:       ptr %Base1
+; CHECK-NEXT:       Against group ([[G2:.+]]):
+; CHECK-NEXT:         %fptr = getelementptr inbounds double, ptr %Base2, i64 %sel
+; CHECK-NEXT:     Grouped accesses:
+; CHECK-NEXT:       Group [[G1]]:
+; CHECK-NEXT:         (Low: %Base1 High: (8 + %Base1))
+; CHECK-NEXT:           Member: %Base1
+; CHECK-NEXT:       Group [[G2]]:
+; CHECK-NEXT:         (Low: %Base2 High: ((8 * %N) + %Base2))
+; CHECK-NEXT:           Member: {%Base2,+,8}<%for.body>
+; CHECK-EMPTY:
+; CHECK-NEXT:     Non vectorizable stores to invariant address were not found in loop.
+; CHECK-NEXT:     SCEV assumptions:
+; CHECK-NEXT:     {0,+,1}<%for.body> Added Flags: <nusw>
+; CHECK-EMPTY:
+; CHECK-NEXT:     Expressions re-written:
+; CHECK-NEXT:     [PSE]  %fptr = getelementptr inbounds double, ptr %Base2, i64 %sel:
+; CHECK-NEXT:       ((8 * (zext i32 {0,+,1}<%for.body> to i64))<nuw><nsw> + %Base2)<nuw>
+; CHECK-NEXT:       --> {%Base2,+,8}<%for.body>
+
+;;; The following test caused an ICE with the initial forked pointers work.
+;;; One fork is loop invariant (%Base2 + 0), the other is an scAddExpr that
+;;; contains an scAddRecExpr inside it:
+;;;   ((8 * (zext i32 {0,+,1}<%for.body> to i64))<nuw><nsw> + %Base2)<nuw>
+;;;
+;;; RtCheck::insert was expecting either loop invariant or SAR, so asserted
+;;; on a plain scAddExpr. For now we restrict to loop invariant or SAR
+;;; forks only, but we should be able to do better.
+
+define void @sc_add_expr_ice(ptr %Base1, ptr %Base2, i64 %N) {
+entry:
+  br label %for.body
+
+for.body:
+  %iv = phi i64 [ %iv.next, %for.body ], [ 0, %entry ]
+  %iv.trunc = trunc i64 %iv to i32
+  store double 0.000000e+00, ptr %Base1, align 8
+  %iv.zext = zext i32 %iv.trunc to i64
+  %sel = select i1 true, i64 %iv.zext, i64 0
+  %fptr = getelementptr inbounds double, ptr %Base2, i64 %sel
+  %dummy.load = load double, ptr %fptr, align 8
+  %iv.next = add nuw nsw i64 %iv, 1
+  %exitcond = icmp eq i64 %iv.next, %N
+  br i1 %exitcond, label %exit, label %for.body
+
+exit:
+  ret void
+}
+
+define void @forked_ptrs_with_different_base(ptr nocapture readonly %Preds, ptr nocapture %a, ptr nocapture %b, ptr nocapture readonly %c)  {
+; CHECK:       for.body:
+; CHECK-NEXT:    Memory dependences are safe with run-time checks
+; CHECK-NEXT:    Dependences:
+; CHECK-NEXT:    Run-time memory checks:
+; CHECK-NEXT:    Check 0:
+; CHECK-NEXT:      Comparing group ([[G1:.+]]):
+; CHECK-NEXT:        %arrayidx7 = getelementptr inbounds double, ptr %.sink, i64 %indvars.iv
+; CHECK-NEXT:      Against group ([[G2:.+]]):
+; CHECK-NEXT:        %arrayidx = getelementptr inbounds i32, ptr %Preds, i64 %indvars.iv
+; CHECK-NEXT:    Check 1:
+; CHECK-NEXT:      Comparing group ([[G1]]):
+; CHECK-NEXT:        %arrayidx7 = getelementptr inbounds double, ptr %.sink, i64 %indvars.iv
+; CHECK-NEXT:      Against group ([[G4:.+]]):
+; CHECK-NEXT:        %arrayidx5 = getelementptr inbounds double, ptr %0, i64 %indvars.iv
+; CHECK-NEXT:    Check 2:
+; CHECK-NEXT:      Comparing group ([[G3:.+]]):
+; CHECK-NEXT:        %arrayidx7 = getelementptr inbounds double, ptr %.sink, i64 %indvars.iv
+; CHECK-NEXT:      Against group ([[G2]]):
+; CHECK-NEXT:        %arrayidx = getelementptr inbounds i32, ptr %Preds, i64 %indvars.iv
+; CHECK-NEXT:    Check 3:
+; CHECK-NEXT:      Comparing group ([[G3]]):
+; CHECK-NEXT:        %arrayidx7 = getelementptr inbounds double, ptr %.sink, i64 %indvars.iv
+; CHECK-NEXT:      Against group ([[G4]]):
+; CHECK-NEXT:        %arrayidx5 = getelementptr inbounds double, ptr %0, i64 %indvars.iv
+; CHECK-NEXT:    Grouped accesses:
+; CHECK-NEXT:      Group [[G1]]:
+; CHECK-NEXT:        (Low: %1 High: (63992 + %1))
+; CHECK-NEXT:          Member: {%1,+,8}<nw><%for.body>
+; CHECK-NEXT:      Group [[G3]]:
+; CHECK-NEXT:        (Low: %2 High: (63992 + %2))
+; CHECK-NEXT:          Member: {%2,+,8}<nw><%for.body>
+; CHECK-NEXT:      Group [[G2]]:
+; CHECK-NEXT:        (Low: %Preds High: (31996 + %Preds))
+; CHECK-NEXT:          Member: {%Preds,+,4}<nuw><%for.body>
+; CHECK-NEXT:      Group [[G4]]:
+; CHECK-NEXT:        (Low: %0 High: (63992 + %0))
+; CHECK-NEXT:          Member: {%0,+,8}<nw><%for.body>
+; CHECK-EMPTY:
+; CHECK-NEXT:    Non vectorizable stores to invariant address were not found in loop.
+entry:
+  %0 = load ptr, ptr %c, align 64
+  %1 = load ptr, ptr %a, align 64
+  %2 = load ptr, ptr %b, align 64
+  br label %for.body
+
+for.cond.cleanup:                                 ; preds = %for.inc
+  ret void
+
+for.body:                                         ; preds = %entry, %for.inc
+  %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.inc ]
+  %arrayidx = getelementptr inbounds i32, ptr %Preds, i64 %indvars.iv
+  %3 = load i32, ptr %arrayidx, align 4
+  %cmp2.not = icmp eq i32 %3, 0
+  br i1 %cmp2.not, label %if.else, label %if.then
+
+if.then:                                          ; preds = %for.body
+  %arrayidx5 = getelementptr inbounds double, ptr %0, i64 %indvars.iv
+  %4 = load double, ptr %arrayidx5, align 8
+  %add = fadd fast double %4, 1.000000e+00
+  br label %for.inc
+
+if.else:                                          ; preds = %for.body
+  %5 = mul nuw nsw i64 %indvars.iv, %indvars.iv
+  %6 = trunc i64 %5 to i32
+  %conv8 = sitofp i32 %6 to double
+  br label %for.inc
+
+for.inc:                                          ; preds = %if.then, %if.else
+  %.sink = phi ptr [ %1, %if.then ], [ %2, %if.else ]
+  %add.sink = phi double [ %add, %if.then ], [ %conv8, %if.else ]
+  %arrayidx7 = getelementptr inbounds double, ptr %.sink, i64 %indvars.iv
+  store double %add.sink, ptr %arrayidx7, align 8
+  %indvars.iv.next = add nuw nsw i64 %indvars.iv, 1
+  %exitcond.not = icmp eq i64 %indvars.iv.next, 7999
+  br i1 %exitcond.not, label %for.cond.cleanup, label %for.body
+}
+
+; Negative test: the operator number of PhiNode is not 2.
+define void @forked_ptrs_with_different_base3(ptr nocapture readonly %Preds, ptr nocapture %a, ptr nocapture %b, ptr nocapture readonly %c)  {
+; CHECK:       for.body:
+; CHECK-NEXT:    Report: cannot identify array bounds
+; CHECK-NEXT:    Dependences:
+; CHECK-NEXT:    Run-time memory checks:
+; CHECK-NEXT:    Grouped accesses:
+; CHECK-EMPTY:
+; CHECK-NEXT:    Non vectorizable stores to invariant address were not found in loop.
+entry:
+  %ld.c = load ptr, ptr %c, align 64
+  %ld.a = load ptr, ptr %a, align 64
+  %ld.b = load ptr, ptr %b, align 64
+  br label %for.body
+
+for.body:                                         ; preds = %entry, %for.inc
+  %indvars.iv = phi i64 [ 0, %entry ], [ %indvars.iv.next, %for.inc ]
+  %arrayidx = getelementptr inbounds i32, ptr %Preds, i64 %indvars.iv
+  %ld.preds = load i32, ptr %arrayidx, align 4
+  switch i32 %ld.preds, label %if.else [
+    i32 0, label %if.br0
+	i32 1, label %if.br1
+  ]
+
+if.br0:                                          ; preds = %for.body
+  br label %for.inc
+
+if.br1:                                          ; preds = %for.body
+  br label %for.inc
+
+if.else:                                         ; preds = %for.body
+  br label %for.inc
+
+for.inc:                                          ; preds = %if.br1, %if.br0
+  %.sink = phi ptr [ %ld.a, %if.br0 ], [ %ld.b, %if.br1 ], [ %ld.c, %if.else ]
+  %arrayidx7 = getelementptr inbounds double, ptr %.sink, i64 %indvars.iv
+  store double 1.000000e+00, ptr %arrayidx7, align 8
+  %indvars.iv.next = add nuw nsw i64 %indvars.iv, 1
+  %exitcond.not = icmp eq i64 %indvars.iv.next, 7999
+  br i1 %exitcond.not, label %for.cond.cleanup, label %for.body
+
+for.cond.cleanup:                                 ; preds = %for.inc
   ret void
 }

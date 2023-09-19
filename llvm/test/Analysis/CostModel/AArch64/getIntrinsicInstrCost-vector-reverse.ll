@@ -3,6 +3,8 @@
 
 ; RUN: opt -passes="print<cost-model>" 2>&1 -disable-output -mtriple=aarch64--linux-gnu -mattr=+sve  < %s | FileCheck %s
 
+target datalayout = "e-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128"
+
 define void @vector_reverse() #0{
 ; CHECK-LABEL: 'vector_reverse'
 ; CHECK-NEXT:  Cost Model: Found an estimated cost of 2 for instruction: %1 = call <16 x i8> @llvm.experimental.vector.reverse.v16i8(<16 x i8> undef)
@@ -19,8 +21,8 @@ define void @vector_reverse() #0{
 ; CHECK-NEXT:  Cost Model: Found an estimated cost of 4 for instruction: %12 = call <8 x float> @llvm.experimental.vector.reverse.v8f32(<8 x float> undef)
 ; CHECK-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %13 = call <2 x double> @llvm.experimental.vector.reverse.v2f64(<2 x double> undef)
 ; CHECK-NEXT:  Cost Model: Found an estimated cost of 2 for instruction: %14 = call <4 x double> @llvm.experimental.vector.reverse.v4f64(<4 x double> undef)
-; CHECK-NEXT:  Cost Model: Found an estimated cost of 42 for instruction: %15 = call <8 x bfloat> @llvm.experimental.vector.reverse.v8bf16(<8 x bfloat> undef)
-; CHECK-NEXT:  Cost Model: Found an estimated cost of 84 for instruction: %16 = call <16 x bfloat> @llvm.experimental.vector.reverse.v16bf16(<16 x bfloat> undef)
+; CHECK-NEXT:  Cost Model: Found an estimated cost of 28 for instruction: %15 = call <8 x bfloat> @llvm.experimental.vector.reverse.v8bf16(<8 x bfloat> undef)
+; CHECK-NEXT:  Cost Model: Found an estimated cost of 56 for instruction: %16 = call <16 x bfloat> @llvm.experimental.vector.reverse.v16bf16(<16 x bfloat> undef)
 ; CHECK-NEXT:  Cost Model: Found an estimated cost of 0 for instruction: ret void
 ;
 

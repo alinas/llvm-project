@@ -258,8 +258,7 @@ void zeroLength(){
   auto *arr4 = new InlineDtor[2][2][0];
   delete[] arr4;
 
-  // FIXME: Should be TRUE once the constructors are handled properly.
-  clang_analyzer_eval(InlineDtor::dtorCalled == 0); // expected-warning {{TRUE}} expected-warning {{FALSE}}
+  clang_analyzer_eval(InlineDtor::dtorCalled == 0); // expected-warning {{TRUE}}
 }
 
 
@@ -344,4 +343,37 @@ void nonConstantRegionExtent(){
   //FIXME: This should be TRUE but memset also sets this
   // region to a conjured symbol.
   clang_analyzer_eval(InlineDtor::dtorCalled == 0); // expected-warning {{TRUE}} expected-warning {{FALSE}}
+}
+
+namespace crash6 {
+
+struct NonTrivialItem {
+  ~NonTrivialItem();
+};
+
+struct WeirdVec {
+  void clear() {
+    delete[] data;
+    size = 0;
+  }
+  NonTrivialItem *data;
+  unsigned size;
+};
+
+void top(int j) {
+  WeirdVec *p = new WeirdVec;
+
+  p[j].size = 0;
+  delete[] p->data; // no-crash
+}
+
+template <typename T>
+T make_unknown() {
+  return reinterpret_cast<T>(static_cast<int>(0.404));
+}
+
+void directUnknownSymbol() {
+  delete[] make_unknown<NonTrivialItem*>(); // no-crash
+}
+
 }

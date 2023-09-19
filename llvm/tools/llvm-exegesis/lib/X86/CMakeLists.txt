@@ -1,14 +1,17 @@
 include_directories(
   ${LLVM_MAIN_SRC_DIR}/lib/Target/X86
-  ${LLVM_LIBRARY_DIR}/Target/X86
+  ${LLVM_BINARY_DIR}/lib/Target/X86
   )
 
 set(LLVM_LINK_COMPONENTS
-  X86
-  Exegesis
-  Core
-  Support
   CodeGen
+  CodeGenTypes
+  Core
+  Exegesis
+  MC
+  Support
+  TargetParser
+  X86
   )
 
 add_llvm_library(LLVMExegesisX86

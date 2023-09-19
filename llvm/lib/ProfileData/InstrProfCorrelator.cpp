@@ -16,6 +16,9 @@
 #include "llvm/DebugInfo/DWARF/DWARFUnit.h"
 #include "llvm/Object/MachO.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/Format.h"
+#include "llvm/Support/WithColor.h"
+#include <optional>
 
 #define DEBUG_TYPE "correlator"
 
@@ -35,6 +38,8 @@ Expected<object::SectionRef> getCountersSection(const object::ObjectFile &Obj) {
 const char *InstrProfCorrelator::FunctionNameAttributeName = "Function Name";
 const char *InstrProfCorrelator::CFGHashAttributeName = "CFG Hash";
 const char *InstrProfCorrelator::NumCountersAttributeName = "Num Counters";
+const char *InstrProfCorrelator::CovFunctionNameAttributeName =
+    "Coverage Function Name";
 
 llvm::Expected<std::unique_ptr<InstrProfCorrelator::Context>>
 InstrProfCorrelator::Context::get(std::unique_ptr<MemoryBuffer> Buffer,
@@ -93,7 +98,7 @@ InstrProfCorrelator::get(std::unique_ptr<MemoryBuffer> Buffer) {
       instrprof_error::unable_to_correlate_profile, "not an object file");
 }
 
-Optional<size_t> InstrProfCorrelator::getDataSize() const {
+std::optional<size_t> InstrProfCorrelator::getDataSize() const {
   if (auto *C = dyn_cast<InstrProfCorrelatorImpl<uint32_t>>(this)) {
     return C->getDataSize();
   } else if (auto *C = dyn_cast<InstrProfCorrelatorImpl<uint64_t>>(this)) {
@@ -141,9 +146,9 @@ InstrProfCorrelatorImpl<IntPtrT>::get(
 }
 
 template <class IntPtrT>
-Error InstrProfCorrelatorImpl<IntPtrT>::correlateProfileData() {
+Error InstrProfCorrelatorImpl<IntPtrT>::correlateProfileData(int MaxWarnings) {
   assert(Data.empty() && Names.empty() && NamesVec.empty());
-  correlateProfileDataImpl();
+  correlateProfileDataImpl(MaxWarnings);
   if (Data.empty() || NamesVec.empty())
     return make_error<InstrProfError>(
         instrprof_error::unable_to_correlate_profile,
@@ -153,6 +158,43 @@ Error InstrProfCorrelatorImpl<IntPtrT>::correlateProfileData() {
   CounterOffsets.clear();
   NamesVec.clear();
   return Result;
+}
+
+template <> struct yaml::MappingTraits<InstrProfCorrelator::CorrelationData> {
+  static void mapping(yaml::IO &io,
+                      InstrProfCorrelator::CorrelationData &Data) {
+    io.mapRequired("Probes", Data.Probes);
+  }
+};
+
+template <> struct yaml::MappingTraits<InstrProfCorrelator::Probe> {
+  static void mapping(yaml::IO &io, InstrProfCorrelator::Probe &P) {
+    io.mapRequired("Function Name", P.FunctionName);
+    io.mapOptional("Linkage Name", P.LinkageName);
+    io.mapRequired("CFG Hash", P.CFGHash);
+    io.mapRequired("Counter Offset", P.CounterOffset);
+    io.mapRequired("Num Counters", P.NumCounters);
+    io.mapOptional("File", P.FilePath);
+    io.mapOptional("Line", P.LineNumber);
+  }
+};
+
+template <> struct yaml::SequenceElementTraits<InstrProfCorrelator::Probe> {
+  static const bool flow = false;
+};
+
+template <class IntPtrT>
+Error InstrProfCorrelatorImpl<IntPtrT>::dumpYaml(int MaxWarnings,
+                                                 raw_ostream &OS) {
+  InstrProfCorrelator::CorrelationData Data;
+  correlateProfileDataImpl(MaxWarnings, &Data);
+  if (Data.Probes.empty())
+    return make_error<InstrProfError>(
+        instrprof_error::unable_to_correlate_profile,
+        "could not find any profile metadata in debug info");
+  yaml::Output YamlOS(OS);
+  YamlOS << Data;
+  return Error::success();
 }
 
 template <class IntPtrT>
@@ -180,7 +222,7 @@ void InstrProfCorrelatorImpl<IntPtrT>::addProbe(StringRef FunctionName,
 }
 
 template <class IntPtrT>
-llvm::Optional<uint64_t>
+std::optional<uint64_t>
 DwarfInstrProfCorrelator<IntPtrT>::getLocation(const DWARFDie &Die) const {
   auto Locations = Die.getLocations(dwarf::DW_AT_location);
   if (!Locations) {
@@ -222,16 +264,20 @@ bool DwarfInstrProfCorrelator<IntPtrT>::isDIEOfProbe(const DWARFDie &Die) {
 }
 
 template <class IntPtrT>
-void DwarfInstrProfCorrelator<IntPtrT>::correlateProfileDataImpl() {
+void DwarfInstrProfCorrelator<IntPtrT>::correlateProfileDataImpl(
+    int MaxWarnings, InstrProfCorrelator::CorrelationData *Data) {
+  bool UnlimitedWarnings = (MaxWarnings == 0);
+  // -N suppressed warnings means we can emit up to N (unsuppressed) warnings
+  int NumSuppressedWarnings = -MaxWarnings;
   auto maybeAddProbe = [&](DWARFDie Die) {
     if (!isDIEOfProbe(Die))
       return;
-    Optional<const char *> FunctionName;
-    Optional<uint64_t> CFGHash;
-    Optional<uint64_t> CounterPtr = getLocation(Die);
-    auto FunctionPtr =
-        dwarf::toAddress(Die.getParent().find(dwarf::DW_AT_low_pc));
-    Optional<uint64_t> NumCounters;
+    std::optional<const char *> FunctionName;
+    std::optional<uint64_t> CFGHash;
+    std::optional<uint64_t> CounterPtr = getLocation(Die);
+    auto FnDie = Die.getParent();
+    auto FunctionPtr = dwarf::toAddress(FnDie.find(dwarf::DW_AT_low_pc));
+    std::optional<uint64_t> NumCounters;
     for (const DWARFDie &Child : Die.children()) {
       if (Child.getTag() != dwarf::DW_TAG_LLVM_annotation)
         continue;
@@ -259,32 +305,52 @@ void DwarfInstrProfCorrelator<IntPtrT>::correlateProfileDataImpl() {
       }
     }
     if (!FunctionName || !CFGHash || !CounterPtr || !NumCounters) {
-      LLVM_DEBUG(dbgs() << "Incomplete DIE for probe\n\tFunctionName: "
-                        << FunctionName << "\n\tCFGHash: " << CFGHash
-                        << "\n\tCounterPtr: " << CounterPtr
-                        << "\n\tNumCounters: " << NumCounters);
-      LLVM_DEBUG(Die.dump(dbgs()));
+      if (UnlimitedWarnings || ++NumSuppressedWarnings < 1) {
+        WithColor::warning()
+            << "Incomplete DIE for function " << FunctionName
+            << ": CFGHash=" << CFGHash << "  CounterPtr=" << CounterPtr
+            << "  NumCounters=" << NumCounters << "\n";
+        LLVM_DEBUG(Die.dump(dbgs()));
+      }
       return;
     }
     uint64_t CountersStart = this->Ctx->CountersSectionStart;
     uint64_t CountersEnd = this->Ctx->CountersSectionEnd;
     if (*CounterPtr < CountersStart || *CounterPtr >= CountersEnd) {
-      LLVM_DEBUG(
-          dbgs() << "CounterPtr out of range for probe\n\tFunction Name: "
-                 << FunctionName << "\n\tExpected: [0x"
-                 << Twine::utohexstr(CountersStart) << ", 0x"
-                 << Twine::utohexstr(CountersEnd) << ")\n\tActual: 0x"
-                 << Twine::utohexstr(*CounterPtr));
-      LLVM_DEBUG(Die.dump(dbgs()));
+      if (UnlimitedWarnings || ++NumSuppressedWarnings < 1) {
+        WithColor::warning()
+            << format("CounterPtr out of range for function %s: Actual=0x%x "
+                      "Expected=[0x%x, 0x%x)\n",
+                      *FunctionName, *CounterPtr, CountersStart, CountersEnd);
+        LLVM_DEBUG(Die.dump(dbgs()));
+      }
       return;
     }
-    if (!FunctionPtr) {
-      LLVM_DEBUG(dbgs() << "Could not find address of " << *FunctionName
-                        << "\n");
+    if (!FunctionPtr && (UnlimitedWarnings || ++NumSuppressedWarnings < 1)) {
+      WithColor::warning() << format("Could not find address of function %s\n",
+                                     *FunctionName);
       LLVM_DEBUG(Die.dump(dbgs()));
     }
-    this->addProbe(*FunctionName, *CFGHash, *CounterPtr - CountersStart,
-                   FunctionPtr.value_or(0), *NumCounters);
+    IntPtrT CounterOffset = *CounterPtr - CountersStart;
+    if (Data) {
+      InstrProfCorrelator::Probe P;
+      P.FunctionName = *FunctionName;
+      if (auto Name = FnDie.getName(DINameKind::LinkageName))
+        P.LinkageName = Name;
+      P.CFGHash = *CFGHash;
+      P.CounterOffset = CounterOffset;
+      P.NumCounters = *NumCounters;
+      auto FilePath = FnDie.getDeclFile(
+          DILineInfoSpecifier::FileLineInfoKind::RelativeFilePath);
+      if (!FilePath.empty())
+        P.FilePath = FilePath;
+      if (auto LineNumber = FnDie.getDeclLine())
+        P.LineNumber = LineNumber;
+      Data->Probes.push_back(P);
+    } else {
+      this->addProbe(*FunctionName, *CFGHash, CounterOffset,
+                     FunctionPtr.value_or(0), *NumCounters);
+    }
   };
   for (auto &CU : DICtx->normal_units())
     for (const auto &Entry : CU->dies())
@@ -292,4 +358,81 @@ void DwarfInstrProfCorrelator<IntPtrT>::correlateProfileDataImpl() {
   for (auto &CU : DICtx->dwo_units())
     for (const auto &Entry : CU->dies())
       maybeAddProbe(DWARFDie(CU.get(), &Entry));
+
+  if (!UnlimitedWarnings && NumSuppressedWarnings > 0)
+    WithColor::warning() << format("Suppressed %d additional warnings\n",
+                                   NumSuppressedWarnings);
+}
+
+template <class IntPtrT>
+Error DwarfInstrProfCorrelator<IntPtrT>::correlateCovUnusedFuncNames(
+    int MaxWarnings) {
+  bool UnlimitedWarnings = (MaxWarnings == 0);
+  // -N suppressed warnings means we can emit up to N (unsuppressed) warnings
+  int NumSuppressedWarnings = -MaxWarnings;
+  std::vector<std::string> UnusedFuncNames;
+  auto IsDIEOfCovName = [](const DWARFDie &Die) {
+    const auto &ParentDie = Die.getParent();
+    if (!Die.isValid() || !ParentDie.isValid() || Die.isNULL())
+      return false;
+    if (Die.getTag() != dwarf::DW_TAG_variable)
+      return false;
+    if (ParentDie.getParent().isValid())
+      return false;
+    if (!Die.hasChildren())
+      return false;
+    if (const char *Name = Die.getName(DINameKind::ShortName))
+      return StringRef(Name).startswith(getCoverageUnusedNamesVarName());
+    return false;
+  };
+  auto MaybeAddCovFuncName = [&](DWARFDie Die) {
+    if (!IsDIEOfCovName(Die))
+      return;
+    for (const DWARFDie &Child : Die.children()) {
+      if (Child.getTag() != dwarf::DW_TAG_LLVM_annotation)
+        continue;
+      auto AnnotationFormName = Child.find(dwarf::DW_AT_name);
+      auto AnnotationFormValue = Child.find(dwarf::DW_AT_const_value);
+      if (!AnnotationFormName || !AnnotationFormValue)
+        continue;
+      auto AnnotationNameOrErr = AnnotationFormName->getAsCString();
+      if (auto Err = AnnotationNameOrErr.takeError()) {
+        consumeError(std::move(Err));
+        continue;
+      }
+      std::optional<const char *> FunctionName;
+      StringRef AnnotationName = *AnnotationNameOrErr;
+      if (AnnotationName.compare(
+              InstrProfCorrelator::CovFunctionNameAttributeName) == 0) {
+        if (auto EC =
+                AnnotationFormValue->getAsCString().moveInto(FunctionName))
+          consumeError(std::move(EC));
+      }
+      if (!FunctionName) {
+        if (UnlimitedWarnings || ++NumSuppressedWarnings < 1) {
+          WithColor::warning() << format(
+              "Missing coverage function name value at DIE 0x%08" PRIx64,
+              Child.getOffset());
+        }
+        return;
+      }
+      UnusedFuncNames.push_back(*FunctionName);
+    }
+  };
+  for (auto &CU : DICtx->normal_units())
+    for (const auto &Entry : CU->dies())
+      MaybeAddCovFuncName(DWARFDie(CU.get(), &Entry));
+  for (auto &CU : DICtx->dwo_units())
+    for (const auto &Entry : CU->dies())
+      MaybeAddCovFuncName(DWARFDie(CU.get(), &Entry));
+
+  if (!UnlimitedWarnings && NumSuppressedWarnings > 0)
+    WithColor::warning() << format("Suppressed %d additional warnings\n",
+                                   NumSuppressedWarnings);
+  if (!UnusedFuncNames.empty()) {
+    auto Result = collectPGOFuncNameStrings(
+        UnusedFuncNames, /*doCompression=*/false, this->CovUnusedFuncNames);
+    return Result;
+  }
+  return Error::success();
 }

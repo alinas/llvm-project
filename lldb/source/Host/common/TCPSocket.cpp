@@ -150,7 +150,7 @@ Status TCPSocket::CreateSocket(int domain) {
 Status TCPSocket::Connect(llvm::StringRef name) {
 
   Log *log = GetLog(LLDBLog::Communication);
-  LLDB_LOGF(log, "TCPSocket::%s (host/port = %s)", __FUNCTION__, name.data());
+  LLDB_LOG(log, "Connect to host/port {0}", name);
 
   Status error;
   llvm::Expected<HostAndPort> host_port = DecodeHostAndPort(name);
@@ -189,7 +189,7 @@ Status TCPSocket::Connect(llvm::StringRef name) {
 
 Status TCPSocket::Listen(llvm::StringRef name, int backlog) {
   Log *log = GetLog(LLDBLog::Connection);
-  LLDB_LOGF(log, "TCPSocket::%s (%s)", __FUNCTION__, name.data());
+  LLDB_LOG(log, "Listen to {0}", name);
 
   Status error;
   llvm::Expected<HostAndPort> host_port = DecodeHostAndPort(name);
@@ -261,8 +261,8 @@ Status TCPSocket::Accept(Socket *&conn_socket) {
     return error;
   }
 
-  int sock = kInvalidSocketValue;
-  int listen_sock = kInvalidSocketValue;
+  NativeSocket sock = kInvalidSocketValue;
+  NativeSocket listen_sock = kInvalidSocketValue;
   lldb_private::SocketAddress AcceptAddr;
   MainLoop accept_loop;
   std::vector<MainLoopBase::ReadHandleUP> handles;

@@ -10,7 +10,7 @@ Building libc++
 .. _build instructions:
 
 The instructions on this page are aimed at vendors who ship libc++ as part of an
-operating system distribution, a toolchain or similar shipping vehicules. If you
+operating system distribution, a toolchain or similar shipping vehicles. If you
 are a user merely trying to use libc++ in your program, you most likely want to
 refer to your vendor's documentation, or to the general documentation for using
 libc++ :ref:`here <using-libcxx>`.
@@ -77,6 +77,10 @@ CMake invocation at ``<monorepo>/llvm``:
 .. note::
   This type of build is also commonly called a "Runtimes build", but we would like to move
   away from that terminology, which is too confusing.
+
+.. warning::
+  Adding the `--fresh` flag to the top-level cmake invocation in a bootstrapping build *will not*
+  freshen the cmake cache of any of the enabled runtimes.
 
 Support for Windows
 ===================
@@ -157,8 +161,7 @@ e.g. the ``mingw-w64-x86_64-clang`` package), together with CMake and ninja.
           -DCMAKE_C_COMPILER=clang                                                    \
           -DCMAKE_CXX_COMPILER=clang++                                                \
           -DLLVM_ENABLE_RUNTIMES=libcxx                                               \
-          -DLIBCXX_CXX_ABI=libstdc++                                                  \
-          -DLIBCXX_TARGET_INFO="libcxx.test.target_info.MingwLocalTI"
+          -DLIBCXX_CXX_ABI=libstdc++
   > ninja -C build cxx
   > cp /mingw64/bin/{libstdc++-6,libgcc_s_seh-1,libwinpthread-1}.dll lib
   > ninja -C build check-cxx
@@ -212,15 +215,6 @@ libc++ specific options
 
   Toggle the installation of the libc++ headers.
 
-.. option:: LIBCXX_ENABLE_ASSERTIONS:BOOL
-
-  **Default**: ``OFF``
-
-  Build libc++ with assertions enabled in the compiled library, and enable assertions
-  by default when building user code as well. Assertions can be turned off by users
-  by defining ``_LIBCPP_ENABLE_ASSERTIONS=0``. For details, see
-  :ref:`the documentation <assertions-mode>`.
-
 .. option:: LIBCXX_ENABLE_SHARED:BOOL
 
   **Default**: ``ON``
@@ -265,6 +259,15 @@ libc++ specific options
    support for ``wchar_t``. This is especially useful in embedded settings where
    C Standard Libraries don't always provide all the usual bells and whistles.
 
+.. option:: LIBCXX_ENABLE_TIME_ZONE_DATABASE:BOOL
+
+   **Default**: ``ON``
+
+   Whether to include support for time zones in the library. Disabling
+   time zone support can be useful when porting to platforms that don't
+   ship the IANA time zone database. When time zones are not supported,
+   time zone support in <chrono> will be disabled.
+
 .. option:: LIBCXX_INSTALL_LIBRARY_DIR:PATH
 
   **Default**: ``lib${LIBCXX_LIBDIR_SUFFIX}``
@@ -286,6 +289,24 @@ libc++ specific options
 
   Path where target-specific libc++ headers should be installed. If a relative
   path, relative to ``CMAKE_INSTALL_PREFIX``.
+
+.. option:: LIBCXX_SHARED_OUTPUT_NAME:STRING
+
+  **Default**: ``c++``
+
+  Output name for the shared libc++ runtime library.
+
+.. option:: LIBCXX_ADDITIONAL_COMPILE_FLAGS:STRING
+
+  **Default**: ``""``
+
+  Additional Compile only flags which can be provided in cache.
+
+.. option:: LIBCXX_ADDITIONAL_LIBRARIES:STRING
+
+  **Default**: ``""``
+
+  Additional libraries libc++ is linked to which can be provided in cache.
 
 
 .. _ABI Library Specific Options:
@@ -329,6 +350,18 @@ ABI Library Specific Options
 
   Build and use the LLVM unwinder. Note: This option can only be used when
   libc++abi is the C++ ABI library used.
+
+.. option:: LIBCXXABI_ADDITIONAL_COMPILE_FLAGS:STRING
+
+  **Default**: ``""``
+
+  Additional Compile only flags which can be provided in cache.
+
+.. option:: LIBCXXABI_ADDITIONAL_LIBRARIES:STRING
+
+  **Default**: ``""``
+
+  Additional libraries libc++abi is linked to which can be provided in cache.
 
 
 libc++ Feature Options

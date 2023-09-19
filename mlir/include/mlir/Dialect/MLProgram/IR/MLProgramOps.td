@@ -15,7 +15,7 @@ include "mlir/Dialect/MLProgram/IR/MLProgramTypes.td"
 include "mlir/Interfaces/CallInterfaces.td"
 include "mlir/Interfaces/ControlFlowInterfaces.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
-include "mlir/IR/FunctionInterfaces.td"
+include "mlir/Interfaces/FunctionInterfaces.td"
 include "mlir/IR/RegionKindInterface.td"
 include "mlir/IR/SymbolInterfaces.td"
 
@@ -27,7 +27,7 @@ class MLProgram_Op<string mnemonic, list<Trait> traits = []> :
 //===----------------------------------------------------------------------===//
 
 def MLProgram_FuncOp : MLProgram_Op<"func", [
-    CallableOpInterface, FunctionOpInterface, IsolatedFromAbove,
+    FunctionOpInterface, IsolatedFromAbove,
     RegionKindInterface, Symbol
   ]> {
   let summary = "Function containing a single `SSACFG` region";
@@ -52,12 +52,14 @@ def MLProgram_FuncOp : MLProgram_Op<"func", [
 
   let arguments = (ins SymbolNameAttr:$sym_name,
                        TypeAttrOf<FunctionType>:$function_type,
+                       OptionalAttr<DictArrayAttr>:$arg_attrs,
+                       OptionalAttr<DictArrayAttr>:$res_attrs,
                        OptionalAttr<StrAttr>:$sym_visibility);
   let regions = (region AnyRegion:$body);
 
   let extraClassDeclaration = [{
     //===------------------------------------------------------------------===//
-    // CallableOpInterface
+    // FunctionOpInterface Methods
     //===------------------------------------------------------------------===//
 
     /// Returns the region on the current operation that is callable. This may
@@ -66,14 +68,6 @@ def MLProgram_FuncOp : MLProgram_Op<"func", [
     ::mlir::Region *getCallableRegion() {
       return isExternal() ? nullptr : &getBody();
     }
-
-    /// Returns the results types that the callable region produces when
-    /// executed.
-    ArrayRef<Type> getCallableResults() { return getFunctionType().getResults(); }
-
-    //===------------------------------------------------------------------===//
-    // FunctionOpInterface Methods
-    //===------------------------------------------------------------------===//
 
     /// Returns the argument types of this function.
     ArrayRef<Type> getArgumentTypes() { return getFunctionType().getInputs(); }
@@ -203,7 +197,7 @@ def MLProgram_GlobalLoadOp : MLProgram_Op<"global_load", [
 //===----------------------------------------------------------------------===//
 
 def MLProgram_GlobalLoadConstOp : MLProgram_Op<"global_load_const", [
-    NoSideEffect,
+    Pure,
     DeclareOpInterfaceMethods<SymbolUserOpInterface>
   ]> {
   let summary = "Direct load a constant value from a global";
@@ -376,7 +370,7 @@ def MLProgram_GlobalStoreGraphOp : MLProgram_Op<"global_store_graph", [
 //===----------------------------------------------------------------------===//
 
 def MLProgram_SubgraphOp : MLProgram_Op<"subgraph", [
-    CallableOpInterface, FunctionOpInterface, HasOnlyGraphRegion,
+    FunctionOpInterface, HasOnlyGraphRegion,
     IsolatedFromAbove, RegionKindInterface, SingleBlock, Symbol
   ]> {
   let summary = "An function containing a single `Graph` region";
@@ -401,26 +395,20 @@ def MLProgram_SubgraphOp : MLProgram_Op<"subgraph", [
 
   let arguments = (ins SymbolNameAttr:$sym_name,
                        TypeAttrOf<FunctionType>:$function_type,
+                       OptionalAttr<DictArrayAttr>:$arg_attrs,
+                       OptionalAttr<DictArrayAttr>:$res_attrs,
                        OptionalAttr<StrAttr>:$sym_visibility);
   let regions = (region AnyRegion:$body);
 
   let extraClassDeclaration = [{
     //===------------------------------------------------------------------===//
-    // CallableOpInterface
+    // FunctionOpInterface Methods
     //===------------------------------------------------------------------===//
 
     /// Returns the region on the current operation that is callable. This may
     /// return null in the case of an external callable object, e.g. an external
     /// function.
     ::mlir::Region *getCallableRegion() { return isExternal() ? nullptr : &getBody(); }
-
-    /// Returns the results types that the callable region produces when
-    /// executed.
-    ArrayRef<Type> getCallableResults() { return getFunctionType().getResults(); }
-
-    //===------------------------------------------------------------------===//
-    // FunctionOpInterface Methods
-    //===------------------------------------------------------------------===//
 
     /// Returns the argument types of this function.
     ArrayRef<Type> getArgumentTypes() { return getFunctionType().getInputs(); }
@@ -443,7 +431,7 @@ def MLProgram_SubgraphOp : MLProgram_Op<"subgraph", [
 //===----------------------------------------------------------------------===//
 
 def MLProgram_OutputOp : MLProgram_Op<"output", [
-    NoSideEffect, HasParent<"SubgraphOp">, ReturnLike, Terminator
+    Pure, HasParent<"SubgraphOp">, ReturnLike, Terminator
   ]> {
   let summary = "Outputs values from a subgraph function";
   let description = [{
@@ -457,7 +445,7 @@ def MLProgram_OutputOp : MLProgram_Op<"output", [
   let arguments = (ins Variadic<AnyType>:$operands);
 
   let builders = [OpBuilder<(ins), [{
-    build($_builder, $_state, llvm::None);
+    build($_builder, $_state, std::nullopt);
   }]>];
 
   let assemblyFormat = "attr-dict ($operands^ `:` type($operands))?";
@@ -469,7 +457,7 @@ def MLProgram_OutputOp : MLProgram_Op<"output", [
 //===----------------------------------------------------------------------===//
 
 def MLProgram_ReturnOp : MLProgram_Op<"return", [
-    NoSideEffect, HasParent<"FuncOp">, ReturnLike, Terminator
+    Pure, HasParent<"FuncOp">, ReturnLike, Terminator
   ]> {
   let summary = "Returns values from a `func` function";
   let description = [{
@@ -483,7 +471,7 @@ def MLProgram_ReturnOp : MLProgram_Op<"return", [
   let arguments = (ins Variadic<AnyType>:$operands);
 
   let builders = [OpBuilder<(ins), [{
-    build($_builder, $_state, llvm::None);
+    build($_builder, $_state, std::nullopt);
   }]>];
 
   let assemblyFormat = "attr-dict ($operands^ `:` type($operands))?";
@@ -495,7 +483,7 @@ def MLProgram_ReturnOp : MLProgram_Op<"return", [
 //===----------------------------------------------------------------------===//
 
 def MLProgram_TokenOp : MLProgram_Op<"token", [
-    NoSideEffect
+    Pure
   ]> {
   let summary = "Produces a new token value";
   let description = [{

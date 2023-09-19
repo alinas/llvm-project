@@ -1,13 +1,16 @@
 include_directories(
   ${LLVM_MAIN_SRC_DIR}/lib/Target/PowerPC
-  ${LLVM_LIBRARY_DIR}/Target/PowerPC
+  ${LLVM_BINARY_DIR}/lib/Target/PowerPC
   )
 
 set(LLVM_LINK_COMPONENTS
-  PowerPC
-  Exegesis
+  CodeGenTypes
   Core
+  Exegesis
+  MC
+  PowerPC
   Support
+  TargetParser
   )
 
 add_llvm_library(LLVMExegesisPowerPC

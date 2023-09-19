@@ -186,16 +186,49 @@ define i32 @fneg_idiom(i32 %arg) {
 }
 
 define i32 @fneg(i32 %arg) {
-; CHECK-LABEL: 'fneg'
-; CHECK-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %F32 = fneg float undef
-; CHECK-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V4F32 = fneg <4 x float> undef
-; CHECK-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V8F32 = fneg <8 x float> undef
-; CHECK-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V16F32 = fneg <16 x float> undef
-; CHECK-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %F64 = fneg double undef
-; CHECK-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V2F64 = fneg <2 x double> undef
-; CHECK-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V4F64 = fneg <4 x double> undef
-; CHECK-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V8F64 = fneg <8 x double> undef
-; CHECK-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: ret i32 undef
+; SSE1-LABEL: 'fneg'
+; SSE1-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %F32 = fneg float undef
+; SSE1-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V4F32 = fneg <4 x float> undef
+; SSE1-NEXT:  Cost Model: Found an estimated cost of 2 for instruction: %V8F32 = fneg <8 x float> undef
+; SSE1-NEXT:  Cost Model: Found an estimated cost of 4 for instruction: %V16F32 = fneg <16 x float> undef
+; SSE1-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %F64 = fneg double undef
+; SSE1-NEXT:  Cost Model: Found an estimated cost of 2 for instruction: %V2F64 = fneg <2 x double> undef
+; SSE1-NEXT:  Cost Model: Found an estimated cost of 4 for instruction: %V4F64 = fneg <4 x double> undef
+; SSE1-NEXT:  Cost Model: Found an estimated cost of 8 for instruction: %V8F64 = fneg <8 x double> undef
+; SSE1-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: ret i32 undef
+;
+; SSE2-LABEL: 'fneg'
+; SSE2-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %F32 = fneg float undef
+; SSE2-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V4F32 = fneg <4 x float> undef
+; SSE2-NEXT:  Cost Model: Found an estimated cost of 2 for instruction: %V8F32 = fneg <8 x float> undef
+; SSE2-NEXT:  Cost Model: Found an estimated cost of 4 for instruction: %V16F32 = fneg <16 x float> undef
+; SSE2-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %F64 = fneg double undef
+; SSE2-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V2F64 = fneg <2 x double> undef
+; SSE2-NEXT:  Cost Model: Found an estimated cost of 2 for instruction: %V4F64 = fneg <4 x double> undef
+; SSE2-NEXT:  Cost Model: Found an estimated cost of 4 for instruction: %V8F64 = fneg <8 x double> undef
+; SSE2-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: ret i32 undef
+;
+; AVX-LABEL: 'fneg'
+; AVX-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %F32 = fneg float undef
+; AVX-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V4F32 = fneg <4 x float> undef
+; AVX-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V8F32 = fneg <8 x float> undef
+; AVX-NEXT:  Cost Model: Found an estimated cost of 2 for instruction: %V16F32 = fneg <16 x float> undef
+; AVX-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %F64 = fneg double undef
+; AVX-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V2F64 = fneg <2 x double> undef
+; AVX-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V4F64 = fneg <4 x double> undef
+; AVX-NEXT:  Cost Model: Found an estimated cost of 2 for instruction: %V8F64 = fneg <8 x double> undef
+; AVX-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: ret i32 undef
+;
+; AVX512-LABEL: 'fneg'
+; AVX512-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %F32 = fneg float undef
+; AVX512-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V4F32 = fneg <4 x float> undef
+; AVX512-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V8F32 = fneg <8 x float> undef
+; AVX512-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V16F32 = fneg <16 x float> undef
+; AVX512-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %F64 = fneg double undef
+; AVX512-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V2F64 = fneg <2 x double> undef
+; AVX512-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V4F64 = fneg <4 x double> undef
+; AVX512-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V8F64 = fneg <8 x double> undef
+; AVX512-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: ret i32 undef
 ;
   %F32 = fneg float undef
   %V4F32 = fneg <4 x float> undef
@@ -269,16 +302,49 @@ define i32 @fmul(i32 %arg) {
 }
 
 define i32 @fdiv(i32 %arg) {
-; CHECK-LABEL: 'fdiv'
-; CHECK-NEXT:  Cost Model: Found an estimated cost of 4 for instruction: %F32 = fdiv float undef, undef
-; CHECK-NEXT:  Cost Model: Found an estimated cost of 4 for instruction: %V4F32 = fdiv <4 x float> undef, undef
-; CHECK-NEXT:  Cost Model: Found an estimated cost of 4 for instruction: %V8F32 = fdiv <8 x float> undef, undef
-; CHECK-NEXT:  Cost Model: Found an estimated cost of 4 for instruction: %V16F32 = fdiv <16 x float> undef, undef
-; CHECK-NEXT:  Cost Model: Found an estimated cost of 4 for instruction: %F64 = fdiv double undef, undef
-; CHECK-NEXT:  Cost Model: Found an estimated cost of 4 for instruction: %V2F64 = fdiv <2 x double> undef, undef
-; CHECK-NEXT:  Cost Model: Found an estimated cost of 4 for instruction: %V4F64 = fdiv <4 x double> undef, undef
-; CHECK-NEXT:  Cost Model: Found an estimated cost of 4 for instruction: %V8F64 = fdiv <8 x double> undef, undef
-; CHECK-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: ret i32 undef
+; SSE1-LABEL: 'fdiv'
+; SSE1-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %F32 = fdiv float undef, undef
+; SSE1-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V4F32 = fdiv <4 x float> undef, undef
+; SSE1-NEXT:  Cost Model: Found an estimated cost of 2 for instruction: %V8F32 = fdiv <8 x float> undef, undef
+; SSE1-NEXT:  Cost Model: Found an estimated cost of 4 for instruction: %V16F32 = fdiv <16 x float> undef, undef
+; SSE1-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %F64 = fdiv double undef, undef
+; SSE1-NEXT:  Cost Model: Found an estimated cost of 2 for instruction: %V2F64 = fdiv <2 x double> undef, undef
+; SSE1-NEXT:  Cost Model: Found an estimated cost of 4 for instruction: %V4F64 = fdiv <4 x double> undef, undef
+; SSE1-NEXT:  Cost Model: Found an estimated cost of 8 for instruction: %V8F64 = fdiv <8 x double> undef, undef
+; SSE1-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: ret i32 undef
+;
+; SSE2-LABEL: 'fdiv'
+; SSE2-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %F32 = fdiv float undef, undef
+; SSE2-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V4F32 = fdiv <4 x float> undef, undef
+; SSE2-NEXT:  Cost Model: Found an estimated cost of 2 for instruction: %V8F32 = fdiv <8 x float> undef, undef
+; SSE2-NEXT:  Cost Model: Found an estimated cost of 4 for instruction: %V16F32 = fdiv <16 x float> undef, undef
+; SSE2-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %F64 = fdiv double undef, undef
+; SSE2-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V2F64 = fdiv <2 x double> undef, undef
+; SSE2-NEXT:  Cost Model: Found an estimated cost of 2 for instruction: %V4F64 = fdiv <4 x double> undef, undef
+; SSE2-NEXT:  Cost Model: Found an estimated cost of 4 for instruction: %V8F64 = fdiv <8 x double> undef, undef
+; SSE2-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: ret i32 undef
+;
+; AVX-LABEL: 'fdiv'
+; AVX-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %F32 = fdiv float undef, undef
+; AVX-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V4F32 = fdiv <4 x float> undef, undef
+; AVX-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V8F32 = fdiv <8 x float> undef, undef
+; AVX-NEXT:  Cost Model: Found an estimated cost of 2 for instruction: %V16F32 = fdiv <16 x float> undef, undef
+; AVX-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %F64 = fdiv double undef, undef
+; AVX-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V2F64 = fdiv <2 x double> undef, undef
+; AVX-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V4F64 = fdiv <4 x double> undef, undef
+; AVX-NEXT:  Cost Model: Found an estimated cost of 2 for instruction: %V8F64 = fdiv <8 x double> undef, undef
+; AVX-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: ret i32 undef
+;
+; AVX512-LABEL: 'fdiv'
+; AVX512-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %F32 = fdiv float undef, undef
+; AVX512-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V4F32 = fdiv <4 x float> undef, undef
+; AVX512-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V8F32 = fdiv <8 x float> undef, undef
+; AVX512-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V16F32 = fdiv <16 x float> undef, undef
+; AVX512-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %F64 = fdiv double undef, undef
+; AVX512-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V2F64 = fdiv <2 x double> undef, undef
+; AVX512-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V4F64 = fdiv <4 x double> undef, undef
+; AVX512-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %V8F64 = fdiv <8 x double> undef, undef
+; AVX512-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: ret i32 undef
 ;
   %F32 = fdiv float undef, undef
   %V4F32 = fdiv <4 x float> undef, undef
@@ -518,8 +584,8 @@ define i32 @fma(i32 %arg) {
 ; AVX-LABEL: 'fma'
 ; AVX-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %F32 = call float @llvm.fma.f32(float undef, float undef, float undef)
 ; AVX-NEXT:  Cost Model: Found an estimated cost of 7 for instruction: %V4F32 = call <4 x float> @llvm.fma.v4f32(<4 x float> undef, <4 x float> undef, <4 x float> undef)
-; AVX-NEXT:  Cost Model: Found an estimated cost of 16 for instruction: %V8F32 = call <8 x float> @llvm.fma.v8f32(<8 x float> undef, <8 x float> undef, <8 x float> undef)
-; AVX-NEXT:  Cost Model: Found an estimated cost of 32 for instruction: %V16F32 = call <16 x float> @llvm.fma.v16f32(<16 x float> undef, <16 x float> undef, <16 x float> undef)
+; AVX-NEXT:  Cost Model: Found an estimated cost of 15 for instruction: %V8F32 = call <8 x float> @llvm.fma.v8f32(<8 x float> undef, <8 x float> undef, <8 x float> undef)
+; AVX-NEXT:  Cost Model: Found an estimated cost of 30 for instruction: %V16F32 = call <16 x float> @llvm.fma.v16f32(<16 x float> undef, <16 x float> undef, <16 x float> undef)
 ; AVX-NEXT:  Cost Model: Found an estimated cost of 1 for instruction: %F64 = call double @llvm.fma.f64(double undef, double undef, double undef)
 ; AVX-NEXT:  Cost Model: Found an estimated cost of 3 for instruction: %V2F64 = call <2 x double> @llvm.fma.v2f64(<2 x double> undef, <2 x double> undef, <2 x double> undef)
 ; AVX-NEXT:  Cost Model: Found an estimated cost of 7 for instruction: %V4F64 = call <4 x double> @llvm.fma.v4f64(<4 x double> undef, <4 x double> undef, <4 x double> undef)

@@ -17,6 +17,7 @@
 #include "SPIRVFrameLowering.h"
 #include "SPIRVISelLowering.h"
 #include "SPIRVInstrInfo.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/CodeGen/GlobalISel/CallLowering.h"
 #include "llvm/CodeGen/GlobalISel/InstructionSelector.h"
 #include "llvm/CodeGen/GlobalISel/LegalizerInfo.h"
@@ -24,6 +25,7 @@
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/TargetParser/Triple.h"
 
 #define GET_SUBTARGETINFO_HEADER
 #include "SPIRVGenSubtargetInfo.inc"
@@ -39,11 +41,13 @@ private:
   uint32_t OpenCLVersion;
 
   SmallSet<SPIRV::Extension::Extension, 4> AvailableExtensions;
+  SmallSet<SPIRV::InstructionSet::InstructionSet, 4> AvailableExtInstSets;
   std::unique_ptr<SPIRVGlobalRegistry> GR;
 
   SPIRVInstrInfo InstrInfo;
   SPIRVFrameLowering FrameLowering;
   SPIRVTargetLowering TLInfo;
+  Triple TargetTriple;
 
   // GlobalISel related APIs.
   std::unique_ptr<CallLowering> CallLoweringInfo;
@@ -51,9 +55,10 @@ private:
   std::unique_ptr<LegalizerInfo> Legalizer;
   std::unique_ptr<InstructionSelector> InstSelector;
 
-  // TODO: Initialise the available extensions based on
-  // the environment settings.
+  // TODO: Initialise the available extensions, extended instruction sets
+  // based on the environment settings.
   void initAvailableExtensions();
+  void initAvailableExtInstSets();
 
 public:
   // This constructor initializes the data members to match that
@@ -68,16 +73,25 @@ public:
   unsigned getPointerSize() const { return PointerSize; }
   bool canDirectlyComparePointers() const;
   // TODO: this environment is not implemented in Triple, we need to decide
-  // how to standartize its support. For now, let's assume that we always
-  // operate with OpenCL.
-  bool isOpenCLEnv() const { return true; }
+  // how to standardize its support. For now, let's assume SPIR-V with physical
+  // addressing is OpenCL, and Logical addressing is Vulkan.
+  bool isOpenCLEnv() const {
+    return TargetTriple.getArch() == Triple::spirv32 ||
+           TargetTriple.getArch() == Triple::spirv64;
+  }
+  bool isVulkanEnv() const { return TargetTriple.getArch() == Triple::spirv; }
   uint32_t getSPIRVVersion() const { return SPIRVVersion; };
   bool isAtLeastSPIRVVer(uint32_t VerToCompareTo) const;
   bool isAtLeastOpenCLVer(uint32_t VerToCompareTo) const;
   // TODO: implement command line args or other ways to determine this.
   bool hasOpenCLFullProfile() const { return true; }
   bool hasOpenCLImageSupport() const { return true; }
+  const SmallSet<SPIRV::Extension::Extension, 4> &
+  getAllAvailableExtensions() const {
+    return AvailableExtensions;
+  }
   bool canUseExtension(SPIRV::Extension::Extension E) const;
+  bool canUseExtInstSet(SPIRV::InstructionSet::InstructionSet E) const;
 
   SPIRVGlobalRegistry *getSPIRVGlobalRegistry() const { return GR.get(); }
 
@@ -102,6 +116,10 @@ public:
   }
   const SPIRVRegisterInfo *getRegisterInfo() const override {
     return &InstrInfo.getRegisterInfo();
+  }
+
+  static bool classof(const TargetSubtargetInfo *ST) {
+    return ST->getTargetTriple().isSPIRV();
   }
 };
 } // namespace llvm

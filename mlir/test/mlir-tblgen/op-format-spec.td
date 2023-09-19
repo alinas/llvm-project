@@ -41,6 +41,9 @@ def DirectiveCustomValidB : TestFormat_Op<[{
 def DirectiveCustomValidC : TestFormat_Op<[{
   custom<MyDirective>($attr) attr-dict
 }]>, Arguments<(ins I64Attr:$attr)>;
+def DirectiveCustomValidD : TestFormat_Op<[{
+  (`(` custom<MyDirective>($operand)^ `)`)? attr-dict
+}]>, Arguments<(ins Optional<I64>:$operand)>;
 
 //===----------------------------------------------------------------------===//
 // functional-type
@@ -172,12 +175,12 @@ def ZCoverageValidC : TestFormat_Op<[{
 // Check that we can infer type equalities from certain traits.
 def ZCoverageValidD : TestFormat_Op<[{
   operands type($result) attr-dict
-}], [SameOperandsAndResultType]>, Arguments<(ins AnyMemRef:$operand)>,
+}], [SameOperandsAndResultType]>, Arguments<(ins AnyMemRef)>,
      Results<(outs AnyMemRef:$result)>;
 def ZCoverageValidE : TestFormat_Op<[{
   $operand type($operand) attr-dict
 }], [SameOperandsAndResultType]>, Arguments<(ins AnyMemRef:$operand)>,
-     Results<(outs AnyMemRef:$result)>;
+     Results<(outs AnyMemRef)>;
 def ZCoverageValidF : TestFormat_Op<[{
   operands type($other) attr-dict
 }], [SameTypeOperands]>, Arguments<(ins AnyMemRef:$operand, AnyMemRef:$other)>;

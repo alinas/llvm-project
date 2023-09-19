@@ -213,7 +213,7 @@ def PseudoConstI: IntImmLeaf<i32, [{ return Imm.getBitWidth() <= 32; }], imm_to_
 def PseudoConstF: FPImmLeaf<f32, [{  return true; }], fimm_to_i32>;
 def ConstPseudoTrue: IntImmLeaf<i32, [{ return Imm.getBitWidth() == 1 && Imm.getZExtValue() == 1; }]>;
 def ConstPseudoFalse: IntImmLeaf<i32, [{ return Imm.getBitWidth() == 1 && Imm.getZExtValue() == 0; }]>;
-def ConstPseudoNull: IntImmLeaf<i64, [{ return Imm.isNullValue(); }]>;
+def ConstPseudoNull: IntImmLeaf<i64, [{ return Imm.isZero(); }]>;
 
 multiclass IntFPImm<bits<16> opCode, string name> {
   def I: Op<opCode, (outs ID:$dst), (ins TYPE:$type, ID:$src, variable_ops),
@@ -688,6 +688,9 @@ def OpGroupUMax: OpGroup<"UMax", 270>;
 def OpGroupSMax: OpGroup<"SMax", 271>;
 
 // TODO: 3.42.22. Device-Side Enqueue Instructions
+def OpEnqueueKernel: Op<292, (outs ID:$res), (ins TYPE:$type, ID:$queue, ID:$flags, ID:$NDR, ID:$nevents, ID:$wevents,
+                                              ID:$revent, ID:$invoke, ID:$param, ID:$psize, ID:$palign, variable_ops),
+                  "$res = OpEnqueueKernel $type $queue $flags $NDR $nevents $wevents $revent $invoke $param $psize $palign">;
 def OpRetainEvent: Op<297, (outs), (ins ID:$event), "OpRetainEvent $event">;
 def OpReleaseEvent: Op<298, (outs), (ins ID:$event), "OpReleaseEvent $event">;
 def OpCreateUserEvent: Op<299, (outs ID:$res), (ins TYPE:$type),
@@ -699,6 +702,10 @@ def OpSetUserEventStatus: Op<301, (outs), (ins ID:$event, ID:$status),
 def OpCaptureEventProfilingInfo: Op<302, (outs),
                   (ins ID:$event, ID:$info, ID:$value),
                   "OpCaptureEventProfilingInfo $event $info $value">;
+def OpGetDefaultQueue: Op<303, (outs ID:$res), (ins TYPE:$type),
+                  "$res = OpGetDefaultQueue $type">;
+def OpBuildNDRange: Op<304, (outs ID:$res), (ins TYPE:$type, ID:$GWS, ID:$LWS, ID:$GWO),
+                  "$res = OpBuildNDRange $type $GWS $LWS $GWO">;
 
 // TODO: 3.42.23. Pipe Instructions
 

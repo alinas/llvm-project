@@ -114,8 +114,7 @@ enum : long {
   long_enum_val = 10000
 };
 
-enum : long x; // expected-error{{unnamed enumeration must be a definition}} \
-// expected-warning{{declaration does not declare anything}}
+enum : long x; // expected-error{{unnamed enumeration must be a definition}}
 
 void PR9333() {
   enum class scoped_enum { yes, no, maybe };
@@ -123,7 +122,6 @@ void PR9333() {
   if (e == scoped_enum::no) { }
 }
 
-// <rdar://problem/9366066>
 namespace rdar9366066 {
   enum class X : unsigned { value };
 

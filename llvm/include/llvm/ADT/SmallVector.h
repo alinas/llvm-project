@@ -349,8 +349,7 @@ protected:
   /// constructing elements as needed.
   template<typename It1, typename It2>
   static void uninitialized_move(It1 I, It1 E, It2 Dest) {
-    std::uninitialized_copy(std::make_move_iterator(I),
-                            std::make_move_iterator(E), Dest);
+    std::uninitialized_move(I, E, Dest);
   }
 
   /// Copy the range [I, E) onto the uninitialized memory starting with "Dest",
@@ -487,8 +486,7 @@ protected:
 
   /// Either const T& or T, depending on whether it's cheap enough to take
   /// parameters by value.
-  using ValueParamT =
-      typename std::conditional<TakesParamByValue, T, const T &>::type;
+  using ValueParamT = std::conditional_t<TakesParamByValue, T, const T &>;
 
   SmallVectorTemplateBase(size_t Size) : SmallVectorTemplateCommon<T>(Size) {}
 
@@ -516,8 +514,8 @@ protected:
   template <typename T1, typename T2>
   static void uninitialized_copy(
       T1 *I, T1 *E, T2 *Dest,
-      std::enable_if_t<std::is_same<typename std::remove_const<T1>::type,
-                                    T2>::value> * = nullptr) {
+      std::enable_if_t<std::is_same<std::remove_const_t<T1>, T2>::value> * =
+          nullptr) {
     // Use memcpy for PODs iterated by pointers (which includes SmallVector
     // iterators): std::uninitialized_copy optimizes to memmove, but we can
     // use memcpy here. Note that I and E are iterators and thus might be
@@ -1208,7 +1206,12 @@ public:
     this->destroy_range(this->begin(), this->end());
   }
 
-  explicit SmallVector(size_t Size, const T &Value = T())
+  explicit SmallVector(size_t Size)
+    : SmallVectorImpl<T>(N) {
+    this->resize(Size);
+  }
+
+  SmallVector(size_t Size, const T &Value)
     : SmallVectorImpl<T>(N) {
     this->assign(Size, Value);
   }
@@ -1290,8 +1293,8 @@ inline size_t capacity_in_bytes(const SmallVector<T, N> &X) {
 
 template <typename RangeType>
 using ValueTypeFromRangeType =
-    typename std::remove_const<typename std::remove_reference<
-        decltype(*std::begin(std::declval<RangeType &>()))>::type>::type;
+    std::remove_const_t<std::remove_reference_t<decltype(*std::begin(
+        std::declval<RangeType &>()))>>;
 
 /// Given a range of type R, iterate the entire range and return a
 /// SmallVector with elements of the vector.  This is useful, for example,
@@ -1313,6 +1316,12 @@ SmallVector<Out, Size> to_vector_of(R &&Range) {
 template <typename Out, typename R> SmallVector<Out> to_vector_of(R &&Range) {
   return {std::begin(Range), std::end(Range)};
 }
+
+// Explicit instantiations
+extern template class llvm::SmallVectorBase<uint32_t>;
+#if SIZE_MAX > UINT32_MAX
+extern template class llvm::SmallVectorBase<uint64_t>;
+#endif
 
 } // end namespace llvm
 

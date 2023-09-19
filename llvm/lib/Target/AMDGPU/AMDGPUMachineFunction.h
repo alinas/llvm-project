@@ -11,7 +11,6 @@
 
 #include "Utils/AMDGPUBaseInfo.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
@@ -19,6 +18,9 @@
 #include "llvm/IR/GlobalVariable.h"
 
 namespace llvm {
+
+class AMDGPUSubtarget;
+class GCNSubtarget;
 
 class AMDGPUMachineFunction : public MachineFunctionInfo {
   /// A map to keep track of local memory objects and their offsets within the
@@ -45,15 +47,15 @@ protected:
   /// stages.
   Align DynLDSAlign;
 
-  // State of MODE register, assumed FP mode.
-  AMDGPU::SIModeRegisterDefaults Mode;
-
   // Kernels + shaders. i.e. functions called by the hardware and not called
   // by other functions.
   bool IsEntryFunction = false;
 
   // Entry points called by other functions instead of directly by the hardware.
   bool IsModuleEntryFunction = false;
+
+  // Functions with the amdgpu_cs_chain or amdgpu_cs_chain_preserve CC.
+  bool IsChainFunction = false;
 
   bool NoSignedZerosFPMath = false;
 
@@ -64,7 +66,7 @@ protected:
   bool WaveLimiter = false;
 
 public:
-  AMDGPUMachineFunction(const MachineFunction &MF);
+  AMDGPUMachineFunction(const Function &F, const AMDGPUSubtarget &ST);
 
   uint64_t getExplicitKernArgSize() const {
     return ExplicitKernArgSize;
@@ -80,15 +82,13 @@ public:
     return GDSSize;
   }
 
-  AMDGPU::SIModeRegisterDefaults getMode() const {
-    return Mode;
-  }
-
   bool isEntryFunction() const {
     return IsEntryFunction;
   }
 
   bool isModuleEntryFunction() const { return IsModuleEntryFunction; }
+
+  bool isChainFunction() const { return IsChainFunction; }
 
   bool hasNoSignedZerosFPMath() const {
     return NoSignedZerosFPMath;
@@ -102,14 +102,19 @@ public:
     return WaveLimiter;
   }
 
-  unsigned allocateLDSGlobal(const DataLayout &DL, const GlobalVariable &GV);
-  void allocateModuleLDSGlobal(const Function &F);
+  unsigned allocateLDSGlobal(const DataLayout &DL, const GlobalVariable &GV) {
+    return allocateLDSGlobal(DL, GV, DynLDSAlign);
+  }
 
-  static Optional<uint32_t> getLDSKernelIdMetadata(const Function &F);
+  unsigned allocateLDSGlobal(const DataLayout &DL, const GlobalVariable &GV,
+                             Align Trailing);
+
+  static std::optional<uint32_t> getLDSKernelIdMetadata(const Function &F);
+  static std::optional<uint32_t> getLDSAbsoluteAddress(const GlobalValue &GV);
 
   Align getDynLDSAlign() const { return DynLDSAlign; }
 
-  void setDynLDSAlign(const DataLayout &DL, const GlobalVariable &GV);
+  void setDynLDSAlign(const Function &F, const GlobalVariable &GV);
 };
 
 }

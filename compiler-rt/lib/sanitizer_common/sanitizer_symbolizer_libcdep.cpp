@@ -159,13 +159,16 @@ void Symbolizer::Flush() {
 }
 
 const char *Symbolizer::Demangle(const char *name) {
+  CHECK(name);
   Lock l(&mu_);
   for (auto &tool : tools_) {
     SymbolizerScope sym_scope(this);
     if (const char *demangled = tool.Demangle(name))
       return demangled;
   }
-  return PlatformDemangle(name);
+  if (const char *demangled = PlatformDemangle(name))
+    return demangled;
+  return name;
 }
 
 bool Symbolizer::FindModuleNameAndOffsetForAddress(uptr address,
@@ -256,6 +259,8 @@ class LLVMSymbolizerProcess final : public SymbolizerProcess {
     const char* const kSymbolizerArch = "--default-arch=x86_64";
 #elif defined(__i386__)
     const char* const kSymbolizerArch = "--default-arch=i386";
+#elif SANITIZER_LOONGARCH64
+    const char *const kSymbolizerArch = "--default-arch=loongarch64";
 #elif SANITIZER_RISCV64
     const char *const kSymbolizerArch = "--default-arch=riscv64";
 #elif defined(__aarch64__)

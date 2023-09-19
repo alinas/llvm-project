@@ -8,12 +8,6 @@
 //
 // This header file defines prototypes of all sparse tensor passes.
 //
-// In general, this file takes the approach of keeping "mechanism" (the
-// actual steps of applying a transformation) completely separate from
-// "policy" (heuristics for when and where to apply transformations).
-// The only exception is in `SparseToSparseConversionStrategy`; for which,
-// see further discussion there.
-//
 //===----------------------------------------------------------------------===//
 
 #ifndef MLIR_DIALECT_SPARSETENSOR_TRANSFORMS_PASSES_H_
@@ -21,18 +15,17 @@
 
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
+#include "mlir/Transforms/DialectConversion.h"
+
+//===----------------------------------------------------------------------===//
+// Include the generated pass header (which needs some early definitions).
+//===----------------------------------------------------------------------===//
 
 namespace mlir {
+
 namespace bufferization {
 struct OneShotBufferizationOptions;
 } // namespace bufferization
-
-// Forward.
-class TypeConverter;
-
-//===----------------------------------------------------------------------===//
-// The Sparsification pass.
-//===----------------------------------------------------------------------===//
 
 /// Defines a parallelization strategy. Any independent loop is a candidate
 /// for parallelization. The loop is made parallel if (1) allowed by the
@@ -45,41 +38,44 @@ enum class SparseParallelizationStrategy {
   kAnyStorageOuterLoop,
   kDenseAnyLoop,
   kAnyStorageAnyLoop
-  // TODO: support reduction parallelization too?
 };
 
-/// Converts command-line parallelization flag to the strategy enum.
-SparseParallelizationStrategy sparseParallelizationStrategy(int32_t flag);
+/// Defines data movement strategy between host and device for GPU.
+// TODO : Zero copy is disabled due to correctness bugs (tracker #64316)
+enum class GPUDataTransferStrategy { kRegularDMA, kZeroCopy, kPinnedDMA };
 
-/// Defines a vectorization strategy. Any inner loop is a candidate (full SIMD
-/// for parallel loops and horizontal SIMD for reduction loops). A loop is
-/// actually vectorized if (1) allowed by the strategy, and (2) the emitted
-/// code is an actual for-loop (and not a co-iterating while-loop).
-enum class SparseVectorizationStrategy {
-  kNone,
-  kDenseInnerLoop,
-  kAnyStorageInnerLoop
-};
+#define GEN_PASS_DECL
+#include "mlir/Dialect/SparseTensor/Transforms/Passes.h.inc"
 
-/// Converts command-line vectorization flag to the strategy enum.
-SparseVectorizationStrategy sparseVectorizationStrategy(int32_t flag);
+//===----------------------------------------------------------------------===//
+// The PreSparsificationRewriting pass.
+//===----------------------------------------------------------------------===//
+
+void populatePreSparsificationRewriting(RewritePatternSet &patterns);
+
+std::unique_ptr<Pass> createPreSparsificationRewritePass();
+
+//===----------------------------------------------------------------------===//
+// The Sparsification pass.
+//===----------------------------------------------------------------------===//
 
 /// Options for the Sparsification pass.
 struct SparsificationOptions {
   SparsificationOptions(SparseParallelizationStrategy p,
-                        SparseVectorizationStrategy v, unsigned vl, bool e,
-                        bool vla)
-      : parallelizationStrategy(p), vectorizationStrategy(v), vectorLength(vl),
-        enableSIMDIndex32(e), enableVLAVectorization(vla) {}
+                        GPUDataTransferStrategy t, bool idxReduc,
+                        bool gpuLibgen, bool enableRT)
+      : parallelizationStrategy(p), gpuDataTransferStrategy(t),
+        enableIndexReduction(idxReduc), enableGPULibgen(gpuLibgen),
+        enableRuntimeLibrary(enableRT) {}
   SparsificationOptions()
       : SparsificationOptions(SparseParallelizationStrategy::kNone,
-                              SparseVectorizationStrategy::kNone, 1u, false,
-                              false) {}
+                              GPUDataTransferStrategy::kRegularDMA, false,
+                              false, true) {}
   SparseParallelizationStrategy parallelizationStrategy;
-  SparseVectorizationStrategy vectorizationStrategy;
-  unsigned vectorLength;
-  bool enableSIMDIndex32;
-  bool enableVLAVectorization;
+  GPUDataTransferStrategy gpuDataTransferStrategy;
+  bool enableIndexReduction;
+  bool enableGPULibgen;
+  bool enableRuntimeLibrary;
 };
 
 /// Sets up sparsification rewriting rules with the given options.
@@ -92,8 +88,27 @@ std::unique_ptr<Pass>
 createSparsificationPass(const SparsificationOptions &options);
 
 //===----------------------------------------------------------------------===//
+// The PostSparsificationRewriting pass.
+//===----------------------------------------------------------------------===//
+
+void populatePostSparsificationRewriting(RewritePatternSet &patterns,
+                                         bool enableRT, bool enableForeach,
+                                         bool enableConvert);
+
+std::unique_ptr<Pass> createPostSparsificationRewritePass();
+std::unique_ptr<Pass>
+createPostSparsificationRewritePass(bool enableRT, bool enableForeach = true,
+                                    bool enableConvert = true);
+
+//===----------------------------------------------------------------------===//
 // The SparseTensorConversion pass.
 //===----------------------------------------------------------------------===//
+
+/// Sparse tensor type converter into an opaque pointer.
+class SparseTensorTypeToPtrConverter : public TypeConverter {
+public:
+  SparseTensorTypeToPtrConverter();
+};
 
 /// Defines a strategy for implementing sparse-to-sparse conversion.
 /// `kAuto` leaves it up to the compiler to automatically determine
@@ -102,17 +117,6 @@ createSparsificationPass(const SparsificationOptions &options);
 /// directly via the algorithm in <https://arxiv.org/abs/2001.02609>;
 /// however, beware that there are many formats not supported by this
 /// conversion method.
-///
-/// The presence of the `kAuto` option violates our usual goal of keeping
-/// policy completely separated from mechanism.  The reason it exists is
-/// because (at present) this strategy can only be specified on a per-file
-/// basis.  To see why this is a problem, note that `kDirect` cannot
-/// support certain conversions; so if there is no `kAuto` setting,
-/// then whenever a file contains a single non-`kDirect`-able conversion
-/// the user would be forced to use `kViaCOO` for all conversions in
-/// that file!  In the future, instead of using this enum as a `Pass`
-/// option, we could instead move it to being an attribute on the
-/// conversion op; at which point `kAuto` would no longer be necessary.
 enum class SparseToSparseConversionStrategy { kAuto, kViaCOO, kDirect };
 
 /// Converts command-line sparse2sparse flag to the strategy enum.
@@ -139,13 +143,93 @@ std::unique_ptr<Pass>
 createSparseTensorConversionPass(const SparseTensorConversionOptions &options);
 
 //===----------------------------------------------------------------------===//
-// Other rewriting rules and passes.
+// The SparseTensorCodegen pass.
 //===----------------------------------------------------------------------===//
 
-void populateSparseTensorRewriting(RewritePatternSet &patterns);
+/// Sparse tensor type converter into an actual buffer.
+class SparseTensorTypeToBufferConverter : public TypeConverter {
+public:
+  SparseTensorTypeToBufferConverter();
+};
 
-std::unique_ptr<Pass> createDenseBufferizationPass(
-    const bufferization::OneShotBufferizationOptions &options);
+/// Sets up sparse tensor codegen rules.
+void populateSparseTensorCodegenPatterns(TypeConverter &typeConverter,
+                                         RewritePatternSet &patterns,
+                                         bool createSparseDeallocs,
+                                         bool enableBufferInitialization);
+
+std::unique_ptr<Pass> createSparseTensorCodegenPass();
+std::unique_ptr<Pass>
+createSparseTensorCodegenPass(bool createSparseDeallocs,
+                              bool enableBufferInitialization);
+
+//===----------------------------------------------------------------------===//
+// The SparseBufferRewrite pass.
+//===----------------------------------------------------------------------===//
+
+void populateSparseBufferRewriting(RewritePatternSet &patterns,
+                                   bool enableBufferInitialization);
+
+std::unique_ptr<Pass> createSparseBufferRewritePass();
+std::unique_ptr<Pass>
+createSparseBufferRewritePass(bool enableBufferInitialization);
+
+//===----------------------------------------------------------------------===//
+// The SparseVectorization pass.
+//===----------------------------------------------------------------------===//
+
+void populateSparseVectorizationPatterns(RewritePatternSet &patterns,
+                                         unsigned vectorLength,
+                                         bool enableVLAVectorization,
+                                         bool enableSIMDIndex32);
+
+std::unique_ptr<Pass> createSparseVectorizationPass();
+std::unique_ptr<Pass> createSparseVectorizationPass(unsigned vectorLength,
+                                                    bool enableVLAVectorization,
+                                                    bool enableSIMDIndex32);
+
+//===----------------------------------------------------------------------===//
+// The SparseGPU pass.
+//===----------------------------------------------------------------------===//
+
+void populateSparseGPUCodegenPatterns(RewritePatternSet &patterns,
+                                      unsigned numThreads);
+
+void populateSparseGPULibgenPatterns(RewritePatternSet &patterns, bool enableRT,
+                                     GPUDataTransferStrategy gpuDataTransfer);
+
+std::unique_ptr<Pass> createSparseGPUCodegenPass();
+std::unique_ptr<Pass> createSparseGPUCodegenPass(unsigned numThreads);
+
+//===----------------------------------------------------------------------===//
+// The SparseStorageSpecifierToLLVM pass.
+//===----------------------------------------------------------------------===//
+
+class StorageSpecifierToLLVMTypeConverter : public TypeConverter {
+public:
+  StorageSpecifierToLLVMTypeConverter();
+};
+
+void populateStorageSpecifierToLLVMPatterns(TypeConverter &converter,
+                                            RewritePatternSet &patterns);
+std::unique_ptr<Pass> createStorageSpecifierToLLVMPass();
+
+//===----------------------------------------------------------------------===//
+// The mini-pipeline for sparsification and bufferization.
+//===----------------------------------------------------------------------===//
+
+bufferization::OneShotBufferizationOptions
+getBufferizationOptionsForSparsification(bool analysisOnly);
+
+std::unique_ptr<Pass> createSparsificationAndBufferizationPass();
+
+std::unique_ptr<Pass> createSparsificationAndBufferizationPass(
+    const bufferization::OneShotBufferizationOptions &bufferizationOptions,
+    const SparsificationOptions &sparsificationOptions,
+    const SparseTensorConversionOptions &sparseTensorConversionOptions,
+    bool createSparseDeallocs, bool enableRuntimeLibrary,
+    bool enableBufferInitialization, unsigned vectorLength,
+    bool enableVLAVectorization, bool enableSIMDIndex32);
 
 //===----------------------------------------------------------------------===//
 // Registration.

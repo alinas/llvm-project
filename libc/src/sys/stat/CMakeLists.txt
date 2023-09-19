@@ -10,10 +10,31 @@ add_entrypoint_object(
 )
 
 add_entrypoint_object(
+  fchmodat
+  ALIAS
+  DEPENDS
+    .${LIBC_TARGET_OS}.fchmodat
+)
+
+add_entrypoint_object(
   fchmod
   ALIAS
   DEPENDS
     .${LIBC_TARGET_OS}.fchmod
+)
+
+add_entrypoint_object(
+  fstat
+  ALIAS
+  DEPENDS
+    .${LIBC_TARGET_OS}.fstat
+)
+
+add_entrypoint_object(
+  lstat
+  ALIAS
+  DEPENDS
+    .${LIBC_TARGET_OS}.lstat
 )
 
 add_entrypoint_object(
@@ -28,4 +49,11 @@ add_entrypoint_object(
   ALIAS
   DEPENDS
     .${LIBC_TARGET_OS}.mkdirat
+)
+
+add_entrypoint_object(
+  stat
+  ALIAS
+  DEPENDS
+    .${LIBC_TARGET_OS}.stat
 )

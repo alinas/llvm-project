@@ -102,6 +102,7 @@ public:
   bool Inquire(InquiryKeywordHash, bool &);
   bool Inquire(InquiryKeywordHash, std::int64_t, bool &); // PENDING=
   bool Inquire(InquiryKeywordHash, std::int64_t &);
+  std::int64_t InquirePos();
   void GotChar(signed int = 1); // for READ(SIZE=); can be <0
 
   MutableModes &mutableModes();
@@ -168,7 +169,7 @@ public:
 
   // Detect and signal any end-of-record condition after input.
   // Returns true if at EOR and remaining input should be padded with blanks.
-  bool CheckForEndOfRecord();
+  bool CheckForEndOfRecord(std::size_t afterReading);
 
   // Skips spaces, advances records, and ignores NAMELIST comments
   std::optional<char32_t> GetNextNonBlank(std::size_t &byteCount) {
@@ -262,6 +263,7 @@ public:
   bool Inquire(InquiryKeywordHash, bool &);
   bool Inquire(InquiryKeywordHash, std::int64_t, bool &);
   bool Inquire(InquiryKeywordHash, std::int64_t &);
+  std::int64_t InquirePos();
 
   void BadInquiryKeywordHashCrash(InquiryKeywordHash);
 
@@ -343,6 +345,7 @@ public:
   MutableModes &mutableModes() { return unit_.modes; }
   void HandleRelativePosition(std::int64_t);
   void HandleAbsolutePosition(std::int64_t);
+  std::int64_t InquirePos();
 
 protected:
   bool free_{true};
@@ -358,11 +361,11 @@ public:
   using typename InternalIoStatementState<DIR>::Buffer;
   InternalFormattedIoStatementState(Buffer internal, std::size_t internalLength,
       const CharType *format, std::size_t formatLength,
-      const char *sourceFile = nullptr, int sourceLine = 0,
-      const Descriptor *formatDescriptor = nullptr);
+      const Descriptor *formatDescriptor = nullptr,
+      const char *sourceFile = nullptr, int sourceLine = 0);
   InternalFormattedIoStatementState(const Descriptor &, const CharType *format,
-      std::size_t formatLength, const char *sourceFile = nullptr,
-      int sourceLine = 0, const Descriptor *formatDescriptor = nullptr);
+      std::size_t formatLength, const Descriptor *formatDescriptor = nullptr,
+      const char *sourceFile = nullptr, int sourceLine = 0);
   IoStatementState &ioStatementState() { return ioStatementState_; }
   void CompleteOperation();
   int EndIoStatement();
@@ -406,6 +409,7 @@ public:
   int EndIoStatement();
   ExternalFileUnit *GetExternalFileUnit() const { return &unit_; }
   void SetAsynchronous();
+  std::int64_t InquirePos();
 
 private:
   ExternalFileUnit &unit_;
@@ -444,8 +448,8 @@ class ExternalFormattedIoStatementState
 public:
   using CharType = CHAR;
   ExternalFormattedIoStatementState(ExternalFileUnit &, const CharType *format,
-      std::size_t formatLength, const char *sourceFile = nullptr,
-      int sourceLine = 0, const Descriptor *formatDescriptor = nullptr);
+      std::size_t formatLength, const Descriptor *formatDescriptor = nullptr,
+      const char *sourceFile = nullptr, int sourceLine = 0);
   void CompleteOperation();
   int EndIoStatement();
   std::optional<DataEdit> GetNextDataEdit(
@@ -483,7 +487,6 @@ public:
   MutableModes &mutableModes();
   ConnectionState &GetConnectionState();
   ExternalFileUnit *GetExternalFileUnit() const;
-  void CompleteOperation();
   int EndIoStatement();
   bool Emit(const char *, std::size_t bytes, std::size_t elementBytes = 0);
   std::size_t GetNextInputBytes(const char *&);
@@ -500,8 +503,8 @@ class ChildFormattedIoStatementState : public ChildIoStatementState<DIR>,
 public:
   using CharType = CHAR;
   ChildFormattedIoStatementState(ChildIo &, const CharType *format,
-      std::size_t formatLength, const char *sourceFile = nullptr,
-      int sourceLine = 0, const Descriptor *formatDescriptor = nullptr);
+      std::size_t formatLength, const Descriptor *formatDescriptor = nullptr,
+      const char *sourceFile = nullptr, int sourceLine = 0);
   MutableModes &mutableModes() { return mutableModes_; }
   void CompleteOperation();
   int EndIoStatement();
@@ -534,10 +537,10 @@ public:
 // OPEN
 class OpenStatementState : public ExternalIoStatementBase {
 public:
-  OpenStatementState(ExternalFileUnit &unit, bool wasExtant,
+  OpenStatementState(ExternalFileUnit &unit, bool wasExtant, bool isNewUnit,
       const char *sourceFile = nullptr, int sourceLine = 0)
-      : ExternalIoStatementBase{unit, sourceFile, sourceLine}, wasExtant_{
-                                                                   wasExtant} {}
+      : ExternalIoStatementBase{unit, sourceFile, sourceLine},
+        wasExtant_{wasExtant}, isNewUnit_{isNewUnit} {}
   bool wasExtant() const { return wasExtant_; }
   void set_status(OpenStatus status) { status_ = status; } // STATUS=
   void set_path(const char *, std::size_t); // FILE=
@@ -552,10 +555,11 @@ public:
 
 private:
   bool wasExtant_;
+  bool isNewUnit_;
   std::optional<OpenStatus> status_;
   std::optional<Position> position_;
   std::optional<Action> action_;
-  Convert convert_{Convert::Native};
+  Convert convert_{Convert::Unknown};
   OwningPtr<char> path_;
   std::size_t pathLength_;
   std::optional<bool> isUnformatted_;

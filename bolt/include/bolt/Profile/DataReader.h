@@ -21,6 +21,7 @@
 #include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
+#include <map>
 #include <unordered_map>
 #include <vector>
 
@@ -426,9 +427,9 @@ protected:
     FuncsToMemData[&BF] = FMD;
   }
 
-  using NamesToBranchesMapTy = StringMap<FuncBranchData>;
-  using NamesToSamplesMapTy = StringMap<FuncSampleData>;
-  using NamesToMemEventsMapTy = StringMap<FuncMemData>;
+  using NamesToBranchesMapTy = std::map<StringRef, FuncBranchData>;
+  using NamesToSamplesMapTy = std::map<StringRef, FuncSampleData>;
+  using NamesToMemEventsMapTy = std::map<StringRef, FuncMemData>;
   using FuncsToBranchesMapTy =
       std::unordered_map<const BinaryFunction *, FuncBranchData *>;
   using FuncsToMemDataMapTy =
@@ -449,7 +450,7 @@ protected:
   bool usesEvent(StringRef Name) const {
     for (auto I = EventNames.begin(), E = EventNames.end(); I != E; ++I) {
       StringRef Event = I->getKey();
-      if (Event.find(Name) != StringRef::npos)
+      if (Event.contains(Name))
         return true;
     }
     return false;

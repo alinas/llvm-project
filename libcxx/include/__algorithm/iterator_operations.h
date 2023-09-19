@@ -21,20 +21,26 @@
 #include <__iterator/next.h>
 #include <__iterator/prev.h>
 #include <__iterator/readable_traits.h>
+#include <__type_traits/enable_if.h>
+#include <__type_traits/is_reference.h>
+#include <__type_traits/is_same.h>
+#include <__type_traits/remove_cvref.h>
 #include <__utility/declval.h>
 #include <__utility/forward.h>
 #include <__utility/move.h>
-#include <type_traits>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #  pragma GCC system_header
 #endif
 
+_LIBCPP_PUSH_MACROS
+#include <__undef_macros>
+
 _LIBCPP_BEGIN_NAMESPACE_STD
 
 template <class _AlgPolicy> struct _IterOps;
 
-#if _LIBCPP_STD_VER > 17
+#if _LIBCPP_STD_VER >= 20
 struct _RangeAlgPolicy {};
 
 template <>
@@ -97,34 +103,30 @@ struct _IterOps<_ClassicAlgPolicy> {
   template <class _Iter>
   _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX14
   static void __validate_iter_reference() {
-    static_assert(is_same<__deref_t<_Iter>, typename iterator_traits<__uncvref_t<_Iter> >::reference>::value,
+    static_assert(is_same<__deref_t<_Iter>, typename iterator_traits<__remove_cvref_t<_Iter> >::reference>::value,
         "It looks like your iterator's `iterator_traits<It>::reference` does not match the return type of "
         "dereferencing the iterator, i.e., calling `*it`. This is undefined behavior according to [input.iterators] "
         "and can lead to dangling reference issues at runtime, so we are flagging this.");
   }
 
   // iter_move
-  template <class _Iter>
+  template <class _Iter, __enable_if_t<is_reference<__deref_t<_Iter> >::value, int> = 0>
   _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX14 static
   // If the result of dereferencing `_Iter` is a reference type, deduce the result of calling `std::move` on it. Note
   // that the C++03 mode doesn't support `decltype(auto)` as the return type.
-  __enable_if_t<
-      is_reference<__deref_t<_Iter> >::value,
-      __move_t<_Iter> >
+  __move_t<_Iter>
   __iter_move(_Iter&& __i) {
     __validate_iter_reference<_Iter>();
 
     return std::move(*std::forward<_Iter>(__i));
   }
 
-  template <class _Iter>
+  template <class _Iter, __enable_if_t<!is_reference<__deref_t<_Iter> >::value, int> = 0>
   _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX14 static
   // If the result of dereferencing `_Iter` is a value type, deduce the return value of this function to also be a
   // value -- otherwise, after `operator*` returns a temporary, this function would return a dangling reference to that
   // temporary. Note that the C++03 mode doesn't support `auto` as the return type.
-  __enable_if_t<
-      !is_reference<__deref_t<_Iter> >::value,
-      __deref_t<_Iter> >
+  __deref_t<_Iter>
   __iter_move(_Iter&& __i) {
     __validate_iter_reference<_Iter>();
 
@@ -147,16 +149,16 @@ struct _IterOps<_ClassicAlgPolicy> {
 
   template <class _Iter>
   _LIBCPP_HIDE_FROM_ABI static _LIBCPP_CONSTEXPR_SINCE_CXX14
-  __uncvref_t<_Iter> next(_Iter&& __it,
-                          typename iterator_traits<__uncvref_t<_Iter> >::difference_type __n = 1) {
+  __remove_cvref_t<_Iter> next(_Iter&& __it,
+                          typename iterator_traits<__remove_cvref_t<_Iter> >::difference_type __n = 1) {
     return std::next(std::forward<_Iter>(__it), __n);
   }
 
   // prev
   template <class _Iter>
   _LIBCPP_HIDE_FROM_ABI static _LIBCPP_CONSTEXPR_SINCE_CXX14
-  __uncvref_t<_Iter> prev(_Iter&& __iter,
-                 typename iterator_traits<__uncvref_t<_Iter> >::difference_type __n = 1) {
+  __remove_cvref_t<_Iter> prev(_Iter&& __iter,
+                 typename iterator_traits<__remove_cvref_t<_Iter> >::difference_type __n = 1) {
     return std::prev(std::forward<_Iter>(__iter), __n);
   }
 
@@ -168,5 +170,7 @@ struct _IterOps<_ClassicAlgPolicy> {
 };
 
 _LIBCPP_END_NAMESPACE_STD
+
+_LIBCPP_POP_MACROS
 
 #endif // _LIBCPP___ALGORITHM_ITERATOR_OPERATIONS_H

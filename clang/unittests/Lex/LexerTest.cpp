@@ -18,6 +18,7 @@
 #include "clang/Basic/TokenKinds.h"
 #include "clang/Lex/HeaderSearch.h"
 #include "clang/Lex/HeaderSearchOptions.h"
+#include "clang/Lex/LiteralSupport.h"
 #include "clang/Lex/MacroArgs.h"
 #include "clang/Lex/MacroInfo.h"
 #include "clang/Lex/ModuleLoader.h"
@@ -25,9 +26,11 @@
 #include "clang/Lex/PreprocessorOptions.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Testing/Annotations/Annotations.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace {
@@ -649,7 +652,7 @@ TEST_F(LexerTest, RawAndNormalLexSameForLineComments) {
           SrcBuffer.data(), SrcBuffer.data(),
           SrcBuffer.data() + SrcBuffer.size());
 
-  auto ToksView = llvm::makeArrayRef(Toks);
+  auto ToksView = llvm::ArrayRef(Toks);
   clang::Token T;
   EXPECT_FALSE(ToksView.empty());
   while (!L.LexFromRawLexer(T)) {
@@ -659,4 +662,36 @@ TEST_F(LexerTest, RawAndNormalLexSameForLineComments) {
   }
   EXPECT_TRUE(ToksView.empty());
 }
+
+TEST(LexerPreambleTest, PreambleBounds) {
+  std::vector<std::string> Cases = {
+      R"cc([[
+        #include <foo>
+        ]]int bar;
+      )cc",
+      R"cc([[
+        #include <foo>
+      ]])cc",
+      R"cc([[
+        // leading comment
+        #include <foo>
+        ]]// trailing comment
+        int bar;
+      )cc",
+      R"cc([[
+        module;
+        #include <foo>
+        ]]module bar;
+        int x;
+      )cc",
+  };
+  for (const auto& Case : Cases) {
+    llvm::Annotations A(Case);
+    clang::LangOptions LangOpts;
+    LangOpts.CPlusPlusModules = true;
+    auto Bounds = Lexer::ComputePreamble(A.code(), LangOpts);
+    EXPECT_EQ(Bounds.Size, A.range().End) << Case;
+  }
+}
+
 } // anonymous namespace

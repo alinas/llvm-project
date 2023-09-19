@@ -107,6 +107,7 @@ enum : uint32_t {
   SG_FVMLIB = 0x2u,
   SG_NORELOC = 0x4u,
   SG_PROTECTED_VERSION_1 = 0x8u,
+  SG_READ_ONLY = 0x10u,
 
   // Constant masks for the "flags" field in llvm::MachO::section and
   // llvm::MachO::section_64
@@ -175,8 +176,11 @@ enum SectionType : uint32_t {
   /// S_THREAD_LOCAL_INIT_FUNCTION_POINTERS - Section with thread local
   /// variable initialization pointers to functions.
   S_THREAD_LOCAL_INIT_FUNCTION_POINTERS = 0x15u,
+  /// S_INIT_FUNC_OFFSETS - Section with 32-bit offsets to initializer
+  /// functions.
+  S_INIT_FUNC_OFFSETS = 0x16u,
 
-  LAST_KNOWN_SECTION_TYPE = S_THREAD_LOCAL_INIT_FUNCTION_POINTERS
+  LAST_KNOWN_SECTION_TYPE = S_INIT_FUNC_OFFSETS
 };
 
 enum : uint32_t {
@@ -469,6 +473,8 @@ enum RelocationInfoType {
   ARM64_RELOC_TLVP_LOAD_PAGEOFF12 = 9,
   // Must be followed by ARM64_RELOC_PAGE21 or ARM64_RELOC_PAGEOFF12.
   ARM64_RELOC_ADDEND = 10,
+  // An authenticated pointer.
+  ARM64_RELOC_AUTHENTICATED_POINTER = 11,
 
   // Constant values for the r_type field in an x86_64 architecture
   // llvm::MachO::relocation_info or llvm::MachO::scattered_relocation_info
@@ -505,7 +511,7 @@ enum PlatformType {
 };
 
 // Values for tools enum in build_tool_version.
-enum { TOOL_CLANG = 1, TOOL_SWIFT = 2, TOOL_LD = 3 };
+enum { TOOL_CLANG = 1, TOOL_SWIFT = 2, TOOL_LD = 3, TOOL_LLD = 4 };
 
 // Structs from <mach-o/loader.h>
 
@@ -865,6 +871,12 @@ struct build_version_command {
   uint32_t ntools;   // number of tool entries following this
 };
 
+struct dyld_env_command {
+  uint32_t cmd;
+  uint32_t cmdsize;
+  uint32_t name;
+};
+
 struct dyld_info_command {
   uint32_t cmd;
   uint32_t cmdsize;
@@ -886,12 +898,17 @@ struct linker_option_command {
   uint32_t count;
 };
 
+union lc_str {
+  uint32_t offset;
+};
+
 struct fileset_entry_command {
   uint32_t cmd;
   uint32_t cmdsize;
   uint64_t vmaddr;
   uint64_t fileoff;
-  uint32_t entry_id;
+  union lc_str entry_id;
+  uint32_t reserved;
 };
 
 // The symseg_command is obsolete and no longer supported.
@@ -1012,7 +1029,7 @@ struct nlist_64 {
 };
 
 // Values for dyld_chained_fixups_header::imports_format.
-enum {
+enum ChainedImportFormat {
   DYLD_CHAINED_IMPORT = 1,
   DYLD_CHAINED_IMPORT_ADDEND = 2,
   DYLD_CHAINED_IMPORT_ADDEND64 = 3,
@@ -1027,8 +1044,8 @@ enum {
 // Values for dyld_chained_starts_in_segment::page_start.
 enum {
   DYLD_CHAINED_PTR_START_NONE = 0xFFFF,
-  DYLD_CHAINED_PTR_START_MULTI = 0x8000,
-  DYLD_CHAINED_PTR_START_LAST = 0x8000,
+  DYLD_CHAINED_PTR_START_MULTI = 0x8000, // page which has multiple starts
+  DYLD_CHAINED_PTR_START_LAST = 0x8000,  // last chain_start for a given page
 };
 
 // Values for dyld_chained_starts_in_segment::pointer_format.
@@ -1061,7 +1078,7 @@ struct dyld_chained_fixups_header {
 };
 
 /// dyld_chained_starts_in_image is embedded in LC_DYLD_CHAINED_FIXUPS payload.
-/// Each each seg_info_offset entry is the offset into this struct for that
+/// Each seg_info_offset entry is the offset into this struct for that
 /// segment followed by pool of dyld_chain_starts_in_segment data.
 struct dyld_chained_starts_in_image {
   uint32_t seg_count;
@@ -1077,6 +1094,51 @@ struct dyld_chained_starts_in_segment {
   uint16_t page_count;        ///< Length of the page_start array
   uint16_t page_start[1];     ///< Page offset of first fixup on each page, or
                               ///< DYLD_CHAINED_PTR_START_NONE if no fixups
+};
+
+// DYLD_CHAINED_IMPORT
+struct dyld_chained_import {
+  uint32_t lib_ordinal : 8;
+  uint32_t weak_import : 1;
+  uint32_t name_offset : 23;
+};
+
+// DYLD_CHAINED_IMPORT_ADDEND
+struct dyld_chained_import_addend {
+  uint32_t lib_ordinal : 8;
+  uint32_t weak_import : 1;
+  uint32_t name_offset : 23;
+  int32_t addend;
+};
+
+// DYLD_CHAINED_IMPORT_ADDEND64
+struct dyld_chained_import_addend64 {
+  uint64_t lib_ordinal : 16;
+  uint64_t weak_import : 1;
+  uint64_t reserved : 15;
+  uint64_t name_offset : 32;
+  uint64_t addend;
+};
+
+// The `bind` field (most significant bit) of the encoded fixup determines
+// whether it is dyld_chained_ptr_64_bind or dyld_chained_ptr_64_rebase.
+
+// DYLD_CHAINED_PTR_64/DYLD_CHAINED_PTR_64_OFFSET
+struct dyld_chained_ptr_64_bind {
+  uint64_t ordinal : 24;
+  uint64_t addend : 8;
+  uint64_t reserved : 19;
+  uint64_t next : 12;
+  uint64_t bind : 1; // set to 1
+};
+
+// DYLD_CHAINED_PTR_64/DYLD_CHAINED_PTR_64_OFFSET
+struct dyld_chained_ptr_64_rebase {
+  uint64_t target : 36;
+  uint64_t high8 : 8;
+  uint64_t reserved : 7;
+  uint64_t next : 12;
+  uint64_t bind : 1; // set to 0
 };
 
 // Byte order swapping functions for MachO structs
@@ -1377,7 +1439,8 @@ inline void swapStruct(fileset_entry_command &C) {
   sys::swapByteOrder(C.cmdsize);
   sys::swapByteOrder(C.vmaddr);
   sys::swapByteOrder(C.fileoff);
-  sys::swapByteOrder(C.entry_id);
+  sys::swapByteOrder(C.entry_id.offset);
+  sys::swapByteOrder(C.reserved);
 }
 
 inline void swapStruct(version_min_command &C) {
@@ -2293,7 +2356,7 @@ struct CS_CodeDirectory {
   uint64_t execSegFlags; /* executable segment flags */
 };
 
-static_assert(sizeof(CS_CodeDirectory) == 88, "");
+static_assert(sizeof(CS_CodeDirectory) == 88);
 
 struct CS_BlobIndex {
   uint32_t type;   /* type of entry */

@@ -219,11 +219,11 @@ public:
   /// Return true for expressions that can't be evaluated at runtime
   /// within given \b Budget.
   ///
-  /// At is a parameter which specifies point in code where user is going to
-  /// expand this expression. Sometimes this knowledge can lead to
+  /// \p At is a parameter which specifies point in code where user is going to
+  /// expand these expressions. Sometimes this knowledge can lead to
   /// a less pessimistic cost estimation.
-  bool isHighCostExpansion(const SCEV *Expr, Loop *L, unsigned Budget,
-                           const TargetTransformInfo *TTI,
+  bool isHighCostExpansion(ArrayRef<const SCEV *> Exprs, Loop *L,
+                           unsigned Budget, const TargetTransformInfo *TTI,
                            const Instruction *At) {
     assert(TTI && "This function requires TTI to be provided.");
     assert(At && "This function requires At instruction to be provided.");
@@ -233,7 +233,8 @@ public:
     SmallPtrSet<const SCEV *, 8> Processed;
     InstructionCost Cost = 0;
     unsigned ScaledBudget = Budget * TargetTransformInfo::TCC_Basic;
-    Worklist.emplace_back(-1, -1, Expr);
+    for (auto *Expr : Exprs)
+      Worklist.emplace_back(-1, -1, Expr);
     while (!Worklist.empty()) {
       const SCEVOperand WorkItem = Worklist.pop_back_val();
       if (isHighCostExpansionHelper(WorkItem, L, *At, Cost, ScaledBudget, *TTI,
@@ -248,8 +249,14 @@ public:
   Instruction *getIVIncOperand(Instruction *IncV, Instruction *InsertPos,
                                bool allowScale);
 
-  /// Utility for hoisting an IV increment.
-  bool hoistIVInc(Instruction *IncV, Instruction *InsertPos);
+  /// Utility for hoisting \p IncV (with all subexpressions requried for its
+  /// computation) before \p InsertPos. If \p RecomputePoisonFlags is set, drops
+  /// all poison-generating flags from instructions being hoisted and tries to
+  /// re-infer them in the new location. It should be used when we are going to
+  /// introduce a new use in the new position that didn't exist before, and may
+  /// trigger new UB in case of poison.
+  bool hoistIVInc(Instruction *IncV, Instruction *InsertPos,
+                  bool RecomputePoisonFlags = false);
 
   /// replace congruent phis with their most canonical representative. Return
   /// the number of phis eliminated.
@@ -270,7 +277,7 @@ public:
   /// Insert code to directly compute the specified SCEV expression into the
   /// program.  The code is inserted into the specified block.
   Value *expandCodeFor(const SCEV *SH, Type *Ty, Instruction *I) {
-    return expandCodeForImpl(SH, Ty, I, true);
+    return expandCodeForImpl(SH, Ty, I);
   }
 
   /// Insert code to directly compute the specified SCEV expression into the
@@ -278,7 +285,7 @@ public:
   /// insertion point. If a type is specified, the result will be expanded to
   /// have that type, with a cast if necessary.
   Value *expandCodeFor(const SCEV *SH, Type *Ty = nullptr) {
-    return expandCodeForImpl(SH, Ty, true);
+    return expandCodeForImpl(SH, Ty);
   }
 
   /// Generates a code sequence that evaluates this predicate.  The inserted
@@ -344,6 +351,10 @@ public:
     Builder.SetInsertPoint(IP);
   }
 
+  void setInsertPoint(BasicBlock::iterator IP) {
+    Builder.SetInsertPoint(IP->getParent(), IP);
+  }
+
   /// Clear the current insertion point. This is useful if the instruction
   /// that had been serving as the insertion point may have been deleted.
   void clearInsertPoint() { Builder.ClearInsertionPoint(); }
@@ -367,20 +378,15 @@ public:
 
   void setChainedPhi(PHINode *PN) { ChainedPhis.insert(PN); }
 
-  /// Try to find the ValueOffsetPair for S. The function is mainly used to
-  /// check whether S can be expanded cheaply.  If this returns a non-None
-  /// value, we know we can codegen the `ValueOffsetPair` into a suitable
-  /// expansion identical with S so that S can be expanded cheaply.
+  /// Determine whether there is an existing expansion of S that can be reused.
+  /// This is used to check whether S can be expanded cheaply.
   ///
   /// L is a hint which tells in which loop to look for the suitable value.
-  /// On success return value which is equivalent to the expanded S at point
-  /// At. Return nullptr if value was not found.
   ///
   /// Note that this function does not perform an exhaustive search. I.e if it
   /// didn't find any value it does not mean that there is no such value.
-  ///
-  Value *getRelatedExistingExpansion(const SCEV *S, const Instruction *At,
-                                     Loop *L);
+  bool hasRelatedExistingExpansion(const SCEV *S, const Instruction *At,
+                                   Loop *L);
 
   /// Returns a suitable insert point after \p I, that dominates \p
   /// MustDominate. Skips instructions inserted by the expander.
@@ -396,13 +402,16 @@ private:
   /// have that type, with a cast if necessary. If \p Root is true, this
   /// indicates that \p SH is the top-level expression to expand passed from
   /// an external client call.
-  Value *expandCodeForImpl(const SCEV *SH, Type *Ty, bool Root);
+  Value *expandCodeForImpl(const SCEV *SH, Type *Ty);
 
   /// Insert code to directly compute the specified SCEV expression into the
   /// program. The code is inserted into the specified block. If \p
   /// Root is true, this indicates that \p SH is the top-level expression to
   /// expand passed from an external client call.
-  Value *expandCodeForImpl(const SCEV *SH, Type *Ty, Instruction *I, bool Root);
+  Value *expandCodeForImpl(const SCEV *SH, Type *Ty, BasicBlock::iterator I);
+  Value *expandCodeForImpl(const SCEV *SH, Type *Ty, Instruction *I) {
+    return expandCodeForImpl(SH, Ty, I->getIterator());
+  }
 
   /// Recursive helper function for isHighCostExpansion.
   bool isHighCostExpansionHelper(const SCEVOperand &WorkItem, Loop *L,
@@ -433,12 +442,14 @@ private:
 
   /// Expand a SCEVAddExpr with a pointer type into a GEP instead of using
   /// ptrtoint+arithmetic+inttoptr.
-  Value *expandAddToGEP(const SCEV *const *op_begin, const SCEV *const *op_end,
-                        PointerType *PTy, Type *Ty, Value *V);
-  Value *expandAddToGEP(const SCEV *Op, PointerType *PTy, Type *Ty, Value *V);
+  Value *expandAddToGEP(const SCEV *Op, Type *Ty, Value *V);
 
   /// Find a previous Value in ExprValueMap for expand.
-  Value *FindValueInExprValueMap(const SCEV *S, const Instruction *InsertPt);
+  /// DropPoisonGeneratingInsts is populated with instructions for which
+  /// poison-generating flags must be dropped if the value is reused.
+  Value *FindValueInExprValueMap(
+      const SCEV *S, const Instruction *InsertPt,
+      SmallVectorImpl<Instruction *> &DropPoisonGeneratingInsts);
 
   Value *expand(const SCEV *S);
 
@@ -449,6 +460,8 @@ private:
                           Twine Name, bool IsSequential = false);
 
   Value *visitConstant(const SCEVConstant *S) { return S->getValue(); }
+
+  Value *visitVScale(const SCEVVScale *S);
 
   Value *visitPtrToIntExpr(const SCEVPtrToIntExpr *S);
 
@@ -493,10 +506,9 @@ private:
 
   void fixupInsertPoints(Instruction *I);
 
-  /// If required, create LCSSA PHIs for \p Users' operand \p OpIdx. If new
-  /// LCSSA PHIs have been created, return the LCSSA PHI available at \p User.
-  /// If no PHIs have been created, return the unchanged operand \p OpIdx.
-  Value *fixupLCSSAFormFor(Instruction *User, unsigned OpIdx);
+  /// Create LCSSA PHIs for \p V, if it is required for uses at the Builder's
+  /// current insertion point.
+  Value *fixupLCSSAFormFor(Value *V);
 };
 
 /// Helper to remove instructions inserted during SCEV expansion, unless they

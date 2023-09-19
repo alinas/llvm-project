@@ -10,6 +10,7 @@ static_library("Orc") {
     "//llvm/lib/Object",
     "//llvm/lib/Passes",
     "//llvm/lib/Support",
+    "//llvm/lib/TargetParser",
     "//llvm/lib/Transforms/Utils",
     "//llvm/lib/WindowsDriver",
   ]
@@ -49,6 +50,7 @@ static_library("Orc") {
     "ObjectTransformLayer.cpp",
     "OrcABISupport.cpp",
     "OrcV2CBindings.cpp",
+    "PerfSupportPlugin.cpp",
     "RTDyldObjectLinkingLayer.cpp",
     "SimpleRemoteEPC.cpp",
     "SpeculateAnalyses.cpp",

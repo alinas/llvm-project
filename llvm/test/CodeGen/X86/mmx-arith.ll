@@ -144,28 +144,28 @@ define void @test1(ptr %A, ptr %B) {
 ; X32:       # %bb.0: # %entry
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %ecx
 ; X32-NEXT:    movl {{[0-9]+}}(%esp), %eax
-; X32-NEXT:    movq {{.*#+}} xmm0 = mem[0],zero
 ; X32-NEXT:    movq {{.*#+}} xmm1 = mem[0],zero
-; X32-NEXT:    paddd %xmm0, %xmm1
-; X32-NEXT:    movq %xmm1, (%eax)
 ; X32-NEXT:    movq {{.*#+}} xmm0 = mem[0],zero
-; X32-NEXT:    pshufd {{.*#+}} xmm2 = xmm1[1,1,3,3]
-; X32-NEXT:    pmuludq %xmm0, %xmm1
-; X32-NEXT:    shufps {{.*#+}} xmm0 = xmm0[1,1,1,1]
-; X32-NEXT:    pmuludq %xmm0, %xmm2
-; X32-NEXT:    pshufd {{.*#+}} xmm0 = xmm2[0,2,2,3]
-; X32-NEXT:    pshufd {{.*#+}} xmm1 = xmm1[0,2,2,3]
-; X32-NEXT:    punpckldq {{.*#+}} xmm1 = xmm1[0],xmm0[0],xmm1[1],xmm0[1]
-; X32-NEXT:    movq %xmm1, (%eax)
-; X32-NEXT:    movq {{.*#+}} xmm0 = mem[0],zero
-; X32-NEXT:    pand %xmm1, %xmm0
+; X32-NEXT:    paddd %xmm1, %xmm0
 ; X32-NEXT:    movq %xmm0, (%eax)
 ; X32-NEXT:    movq {{.*#+}} xmm1 = mem[0],zero
-; X32-NEXT:    por %xmm0, %xmm1
+; X32-NEXT:    pshufd {{.*#+}} xmm2 = xmm0[1,1,3,3]
+; X32-NEXT:    pmuludq %xmm1, %xmm0
+; X32-NEXT:    shufps {{.*#+}} xmm1 = xmm1[1,1,1,1]
+; X32-NEXT:    pmuludq %xmm1, %xmm2
+; X32-NEXT:    pshufd {{.*#+}} xmm1 = xmm2[0,2,2,3]
+; X32-NEXT:    pshufd {{.*#+}} xmm0 = xmm0[0,2,2,3]
+; X32-NEXT:    punpckldq {{.*#+}} xmm0 = xmm0[0],xmm1[0],xmm0[1],xmm1[1]
+; X32-NEXT:    movq %xmm0, (%eax)
+; X32-NEXT:    movq {{.*#+}} xmm1 = mem[0],zero
+; X32-NEXT:    pand %xmm0, %xmm1
 ; X32-NEXT:    movq %xmm1, (%eax)
 ; X32-NEXT:    movq {{.*#+}} xmm0 = mem[0],zero
-; X32-NEXT:    pxor %xmm1, %xmm0
+; X32-NEXT:    por %xmm1, %xmm0
 ; X32-NEXT:    movq %xmm0, (%eax)
+; X32-NEXT:    movq {{.*#+}} xmm1 = mem[0],zero
+; X32-NEXT:    pxor %xmm0, %xmm1
+; X32-NEXT:    movq %xmm1, (%eax)
 ; X32-NEXT:    emms
 ; X32-NEXT:    retl
 ;
@@ -426,19 +426,19 @@ define <1 x i64> @test3(ptr %a, ptr %b, i32 %count) nounwind {
 ;
 ; X64-LABEL: test3:
 ; X64:       # %bb.0: # %entry
-; X64-NEXT:    xorl %r8d, %r8d
+; X64-NEXT:    xorl %ecx, %ecx
 ; X64-NEXT:    xorl %eax, %eax
 ; X64-NEXT:    testl %edx, %edx
 ; X64-NEXT:    je .LBB3_2
 ; X64-NEXT:    .p2align 4, 0x90
 ; X64-NEXT:  .LBB3_1: # %bb26
 ; X64-NEXT:    # =>This Inner Loop Header: Depth=1
-; X64-NEXT:    movslq %r8d, %r8
-; X64-NEXT:    movq (%rdi,%r8,8), %rcx
-; X64-NEXT:    addq (%rsi,%r8,8), %rcx
-; X64-NEXT:    addq %rcx, %rax
-; X64-NEXT:    incl %r8d
-; X64-NEXT:    cmpl %edx, %r8d
+; X64-NEXT:    movslq %ecx, %rcx
+; X64-NEXT:    movq (%rdi,%rcx,8), %r8
+; X64-NEXT:    addq (%rsi,%rcx,8), %r8
+; X64-NEXT:    addq %r8, %rax
+; X64-NEXT:    incl %ecx
+; X64-NEXT:    cmpl %edx, %ecx
 ; X64-NEXT:    jb .LBB3_1
 ; X64-NEXT:  .LBB3_2: # %bb31
 ; X64-NEXT:    retq

@@ -1,14 +1,15 @@
 // Unsupported on AIX because we don't support the requisite "__clangast"
 // section in XCOFF yet.
-// UNSUPPORTED: aix
+// UNSUPPORTED: target={{.*}}-aix{{.*}}
 
 // RUN: rm -rf %t && mkdir %t
 // RUN: cp %S/Inputs/modules-pch/* %t
 
 // Scan dependencies of the PCH:
 //
-// RUN: sed "s|DIR|%/t|g" %S/Inputs/modules-pch/cdb_pch.json > %t/cdb.json
-// RUN: clang-scan-deps -compilation-database %t/cdb.json -format experimental-full \
+// RUN: rm -f %t/cdb_pch.json
+// RUN: sed "s|DIR|%/t|g" %S/Inputs/modules-pch/cdb_pch.json > %t/cdb_pch.json
+// RUN: clang-scan-deps -compilation-database %t/cdb_pch.json -format experimental-full \
 // RUN:   -module-files-dir %t/build > %t/result_pch.json
 // RUN: cat %t/result_pch.json | sed 's:\\\\\?:/:g' | FileCheck %s -DPREFIX=%/t -check-prefix=CHECK-PCH
 //
@@ -61,7 +62,7 @@
 // CHECK-PCH-NEXT:   ],
 // CHECK-PCH-NEXT:   "translation-units": [
 // CHECK-PCH-NEXT:     {
-// CHECK-PCH-NEXT:       "clang-context-hash": "[[HASH_PCH:.*]]",
+// CHECK-PCH:            "clang-context-hash": "[[HASH_PCH:.*]]",
 // CHECK-PCH-NEXT:       "clang-module-deps": [
 // CHECK-PCH-NEXT:         {
 // CHECK-PCH-NEXT:           "context-hash": "[[HASH_MOD_COMMON_1]]",
@@ -74,13 +75,11 @@
 // CHECK-PCH-NEXT:       ],
 // CHECK-PCH-NEXT:       "command-line": [
 // CHECK-PCH:            ],
-// CHECK-PCH-NEXT:       "file-deps": [
+// CHECK-PCH:            "file-deps": [
 // CHECK-PCH-NEXT:         "[[PREFIX]]/pch.h"
 // CHECK-PCH-NEXT:       ],
 // CHECK-PCH-NEXT:       "input-file": "[[PREFIX]]/pch.h"
 // CHECK-PCH-NEXT:     }
-// CHECK-PCH-NEXT:   ]
-// CHECK-PCH-NEXT: }
 
 // Explicitly build the PCH:
 //
@@ -96,8 +95,9 @@
 
 // Scan dependencies of the TU:
 //
-// RUN: sed "s|DIR|%/t|g" %S/Inputs/modules-pch/cdb_tu.json > %t/cdb.json
-// RUN: clang-scan-deps -compilation-database %t/cdb.json -format experimental-full \
+// RUN: rm -f %t/cdb_tu.json
+// RUN: sed "s|DIR|%/t|g" %S/Inputs/modules-pch/cdb_tu.json > %t/cdb_tu.json
+// RUN: clang-scan-deps -compilation-database %t/cdb_tu.json -format experimental-full \
 // RUN:   -module-files-dir %t/build > %t/result_tu.json
 // RUN: cat %t/result_tu.json | sed 's:\\\\\?:/:g' | FileCheck %s -DPREFIX=%/t -check-prefix=CHECK-TU
 //
@@ -118,7 +118,7 @@
 // CHECK-TU-NEXT:   ],
 // CHECK-TU-NEXT:   "translation-units": [
 // CHECK-TU-NEXT:     {
-// CHECK-TU-NEXT:       "clang-context-hash": "[[HASH_TU:.*]]",
+// CHECK-TU:            "clang-context-hash": "[[HASH_TU:.*]]",
 // CHECK-TU-NEXT:       "clang-module-deps": [
 // CHECK-TU-NEXT:         {
 // CHECK-TU-NEXT:           "context-hash": "[[HASH_MOD_TU]]",
@@ -127,14 +127,12 @@
 // CHECK-TU-NEXT:       ],
 // CHECK-TU-NEXT:       "command-line": [
 // CHECK-TU:            ],
-// CHECK-TU-NEXT:       "file-deps": [
+// CHECK-TU:            "file-deps": [
 // CHECK-TU-NEXT:         "[[PREFIX]]/tu.c",
 // CHECK-TU-NEXT:         "[[PREFIX]]/pch.h.gch"
 // CHECK-TU-NEXT:       ],
 // CHECK-TU-NEXT:       "input-file": "[[PREFIX]]/tu.c"
 // CHECK-TU-NEXT:     }
-// CHECK-TU-NEXT:   ]
-// CHECK-TU-NEXT: }
 
 // Explicitly build the TU:
 //
@@ -146,8 +144,9 @@
 
 // Scan dependencies of the TU that has common modules with the PCH:
 //
-// RUN: sed "s|DIR|%/t|g" %S/Inputs/modules-pch/cdb_tu_with_common.json > %t/cdb.json
-// RUN: clang-scan-deps -compilation-database %t/cdb.json -format experimental-full \
+// RUN: rm -f %t/cdb_tu_with_common.json
+// RUN: sed "s|DIR|%/t|g" %S/Inputs/modules-pch/cdb_tu_with_common.json > %t/cdb_tu_with_common.json
+// RUN: clang-scan-deps -compilation-database %t/cdb_tu_with_common.json -format experimental-full \
 // RUN:   -module-files-dir %t/build > %t/result_tu_with_common.json
 // RUN: cat %t/result_tu_with_common.json | sed 's:\\\\\?:/:g' | FileCheck %s -DPREFIX=%/t -check-prefix=CHECK-TU-WITH-COMMON
 //
@@ -168,7 +167,7 @@
 // CHECK-TU-WITH-COMMON-NEXT:   ],
 // CHECK-TU-WITH-COMMON-NEXT:   "translation-units": [
 // CHECK-TU-WITH-COMMON-NEXT:     {
-// CHECK-TU-WITH-COMMON-NEXT:       "clang-context-hash": "[[HASH_TU_WITH_COMMON:.*]]",
+// CHECK-TU-WITH-COMMON:            "clang-context-hash": "[[HASH_TU_WITH_COMMON:.*]]",
 // CHECK-TU-WITH-COMMON-NEXT:       "clang-module-deps": [
 // CHECK-TU-WITH-COMMON-NEXT:         {
 // CHECK-TU-WITH-COMMON-NEXT:           "context-hash": "[[HASH_MOD_TU_WITH_COMMON]]",
@@ -178,14 +177,12 @@
 // CHECK-TU-WITH-COMMON-NEXT:       "command-line": [
 // CHECK-TU-WITH-COMMON:              "-fmodule-file=[[PREFIX]]/build/{{.*}}/ModCommon2-{{.*}}.pcm"
 // CHECK-TU-WITH-COMMON:            ],
-// CHECK-TU-WITH-COMMON-NEXT:       "file-deps": [
+// CHECK-TU-WITH-COMMON:            "file-deps": [
 // CHECK-TU-WITH-COMMON-NEXT:         "[[PREFIX]]/tu_with_common.c",
 // CHECK-TU-WITH-COMMON-NEXT:         "[[PREFIX]]/pch.h.gch"
 // CHECK-TU-WITH-COMMON-NEXT:       ],
 // CHECK-TU-WITH-COMMON-NEXT:       "input-file": "[[PREFIX]]/tu_with_common.c"
 // CHECK-TU-WITH-COMMON-NEXT:     }
-// CHECK-TU-WITH-COMMON-NEXT:   ]
-// CHECK-TU-WITH-COMMON-NEXT: }
 
 // Explicitly build the TU that has common modules with the PCH:
 //

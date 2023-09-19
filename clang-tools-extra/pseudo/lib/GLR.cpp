@@ -19,6 +19,7 @@
 #include "llvm/Support/FormatVariadic.h"
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <queue>
 
 #define DEBUG_TYPE "GLR.cpp"
@@ -133,7 +134,7 @@ void glrRecover(llvm::ArrayRef<const GSS::Node *> OldHeads,
   });
 
   // We may find multiple winners, but they will have the same range.
-  llvm::Optional<Token::Range> RecoveryRange;
+  std::optional<Token::Range> RecoveryRange;
   std::vector<const PlaceholderRecovery *> BestOptions;
   for (const PlaceholderRecovery &Option : Options) {
     // If this starts further left than options we've already found, then
@@ -236,7 +237,7 @@ void glrShift(llvm::ArrayRef<const GSS::Node *> OldHeads,
       Shifts.push_back({*S, H});
   llvm::stable_sort(Shifts, llvm::less_first{});
 
-  auto Rest = llvm::makeArrayRef(Shifts);
+  auto Rest = llvm::ArrayRef(Shifts);
   llvm::SmallVector<const GSS::Node *> Parents;
   while (!Rest.empty()) {
     // Collect the batch of PendingShift that have compatible shift states.
@@ -563,7 +564,7 @@ private:
     if (!Sequences.empty() || Heads->size() != NextPopHead + 1)
       return false;
     const GSS::Node *Head = Heads->back();
-    llvm::Optional<RuleID> RID;
+    std::optional<RuleID> RID;
     for (RuleID R : Lang.Table.getReduceRules(Head->State)) {
       if (RID.has_value())
         return false;
@@ -598,8 +599,8 @@ private:
 
 } // namespace
 
-const ForestNode &glrParse(const ParseParams &Params, SymbolID StartSymbol,
-                           const Language &Lang) {
+ForestNode &glrParse(const ParseParams &Params, SymbolID StartSymbol,
+                     const Language &Lang) {
   GLRReduce Reduce(Params, Lang);
   assert(isNonterminal(StartSymbol) && "Start symbol must be a nonterminal");
   llvm::ArrayRef<ForestNode> Terminals = Params.Forest.createTerminals(Params.Code);
@@ -686,7 +687,7 @@ const ForestNode &glrParse(const ParseParams &Params, SymbolID StartSymbol,
     return Result;
   };
   if (auto *Result = SearchForAccept(Heads))
-    return *Result;
+    return *const_cast<ForestNode *>(Result); // Safe: we created all nodes.
   // We failed to parse the input, returning an opaque forest node for recovery.
   // FIXME: as above, we can add fallback error handling so this is impossible.
   return Params.Forest.createOpaque(StartSymbol, /*Token::Index=*/0);
@@ -699,7 +700,6 @@ void glrReduce(std::vector<const GSS::Node *> &Heads, SymbolID Lookahead,
 }
 
 const GSS::Node *GSS::addNode(LRTable::StateID State, const ForestNode *Symbol,
-
                               llvm::ArrayRef<const Node *> Parents) {
   Node *Result = new (allocate(Parents.size())) Node();
   Result->State = State;

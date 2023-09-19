@@ -11,11 +11,11 @@
 
 #include <__algorithm/iterator_operations.h>
 #include <__config>
-#include <__debug>
 #include <__iterator/iterator_traits.h>
 #include <__random/uniform_int_distribution.h>
 #include <__utility/forward.h>
 #include <__utility/move.h>
+#include <__utility/swap.h>
 #include <cstddef>
 #include <cstdint>
 
@@ -28,12 +28,12 @@ _LIBCPP_PUSH_MACROS
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 
-class _LIBCPP_TYPE_VIS __libcpp_debug_randomizer {
+class _LIBCPP_EXPORTED_FROM_ABI __libcpp_debug_randomizer {
 public:
-  __libcpp_debug_randomizer() {
-    __state = __seed();
-    __inc = __state + 0xda3e39cb94b95bdbULL;
-    __inc = (__inc << 1) | 1;
+  _LIBCPP_HIDE_FROM_ABI __libcpp_debug_randomizer() {
+    __state_ = __seed();
+    __inc_ = __state_ + 0xda3e39cb94b95bdbULL;
+    __inc_ = (__inc_ << 1) | 1;
   }
   typedef uint_fast32_t result_type;
 
@@ -41,8 +41,8 @@ public:
   static const result_type _Max = 0xFFFFFFFF;
 
   _LIBCPP_HIDE_FROM_ABI result_type operator()() {
-    uint_fast64_t __oldstate = __state;
-    __state = __oldstate * 6364136223846793005ULL + __inc;
+    uint_fast64_t __oldstate = __state_;
+    __state_ = __oldstate * 6364136223846793005ULL + __inc_;
     return __oldstate >> 32;
   }
 
@@ -50,8 +50,8 @@ public:
   static _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR result_type max() { return _Max; }
 
 private:
-  uint_fast64_t __state;
-  uint_fast64_t __inc;
+  uint_fast64_t __state_;
+  uint_fast64_t __inc_;
   _LIBCPP_HIDE_FROM_ABI static uint_fast64_t __seed() {
 #ifdef _LIBCPP_DEBUG_RANDOMIZE_UNSPECIFIED_STABILITY_SEED
     return _LIBCPP_DEBUG_RANDOMIZE_UNSPECIFIED_STABILITY_SEED;
@@ -64,11 +64,11 @@ private:
 
 #if _LIBCPP_STD_VER <= 14 || defined(_LIBCPP_ENABLE_CXX17_REMOVED_RANDOM_SHUFFLE) \
   || defined(_LIBCPP_BUILDING_LIBRARY)
-class _LIBCPP_TYPE_VIS __rs_default;
+class _LIBCPP_EXPORTED_FROM_ABI __rs_default;
 
-_LIBCPP_FUNC_VIS __rs_default __rs_get();
+_LIBCPP_EXPORTED_FROM_ABI __rs_default __rs_get();
 
-class _LIBCPP_TYPE_VIS __rs_default
+class _LIBCPP_EXPORTED_FROM_ABI __rs_default
 {
     static unsigned __c_;
 
@@ -84,13 +84,13 @@ public:
 
     result_type operator()();
 
-    static _LIBCPP_CONSTEXPR result_type min() {return _Min;}
-    static _LIBCPP_CONSTEXPR result_type max() {return _Max;}
+    static _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR result_type min() {return _Min;}
+    static _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR result_type max() {return _Max;}
 
-    friend _LIBCPP_FUNC_VIS __rs_default __rs_get();
+    friend _LIBCPP_EXPORTED_FROM_ABI __rs_default __rs_get();
 };
 
-_LIBCPP_FUNC_VIS __rs_default __rs_get();
+_LIBCPP_EXPORTED_FROM_ABI __rs_default __rs_get();
 
 template <class _RandomAccessIterator>
 _LIBCPP_HIDE_FROM_ABI _LIBCPP_DEPRECATED_IN_CXX14 void

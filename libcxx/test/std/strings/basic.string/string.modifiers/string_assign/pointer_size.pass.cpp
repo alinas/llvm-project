@@ -19,55 +19,37 @@
 #include "min_allocator.h"
 
 template <class S>
-TEST_CONSTEXPR_CXX20 void
-test(S s, const typename S::value_type* str, typename S::size_type n, S expected)
-{
-    s.assign(str, n);
-    LIBCPP_ASSERT(s.__invariants());
-    assert(s == expected);
+TEST_CONSTEXPR_CXX20 void test(S s, const typename S::value_type* str, typename S::size_type n, S expected) {
+  s.assign(str, n);
+  LIBCPP_ASSERT(s.__invariants());
+  assert(s == expected);
+}
+
+template <class S>
+TEST_CONSTEXPR_CXX20 void test_string() {
+  test(S(), "", 0, S());
+  test(S(), "12345", 3, S("123"));
+  test(S(), "12345", 4, S("1234"));
+  test(S(), "12345678901234567890", 0, S());
+  test(S(), "12345678901234567890", 1, S("1"));
+  test(S(), "12345678901234567890", 3, S("123"));
+  test(S(), "12345678901234567890", 20, S("12345678901234567890"));
+
+  test(S("12345"), "", 0, S());
+  test(S("12345"), "12345", 5, S("12345"));
+  test(S("12345"), "1234567890", 10, S("1234567890"));
+
+  test(S("12345678901234567890"), "", 0, S());
+  test(S("12345678901234567890"), "12345", 5, S("12345"));
+  test(S("12345678901234567890"), "12345678901234567890", 20, S("12345678901234567890"));
 }
 
 TEST_CONSTEXPR_CXX20 bool test() {
-  {
-    typedef std::string S;
-    test(S(), "", 0, S());
-    test(S(), "12345", 3, S("123"));
-    test(S(), "12345", 4, S("1234"));
-    test(S(), "12345678901234567890", 0, S());
-    test(S(), "12345678901234567890", 1, S("1"));
-    test(S(), "12345678901234567890", 3, S("123"));
-    test(S(), "12345678901234567890", 20, S("12345678901234567890"));
-
-    test(S("12345"), "", 0, S());
-    test(S("12345"), "12345", 5, S("12345"));
-    test(S("12345"), "1234567890", 10, S("1234567890"));
-
-    test(S("12345678901234567890"), "", 0, S());
-    test(S("12345678901234567890"), "12345", 5, S("12345"));
-    test(S("12345678901234567890"), "12345678901234567890", 20,
-         S("12345678901234567890"));
-  }
+  test_string<std::string>();
 #if TEST_STD_VER >= 11
-  {
-    typedef std::basic_string<char, std::char_traits<char>, min_allocator<char>> S;
-    test(S(), "", 0, S());
-    test(S(), "12345", 3, S("123"));
-    test(S(), "12345", 4, S("1234"));
-    test(S(), "12345678901234567890", 0, S());
-    test(S(), "12345678901234567890", 1, S("1"));
-    test(S(), "12345678901234567890", 3, S("123"));
-    test(S(), "12345678901234567890", 20, S("12345678901234567890"));
-
-    test(S("12345"), "", 0, S());
-    test(S("12345"), "12345", 5, S("12345"));
-    test(S("12345"), "1234567890", 10, S("1234567890"));
-
-    test(S("12345678901234567890"), "", 0, S());
-    test(S("12345678901234567890"), "12345", 5, S("12345"));
-    test(S("12345678901234567890"), "12345678901234567890", 20,
-         S("12345678901234567890"));
-  }
+  test_string<std::basic_string<char, std::char_traits<char>, min_allocator<char>>>();
 #endif
+
   { // test assign to self
     typedef std::string S;
     S s_short = "123/";
@@ -81,15 +63,13 @@ TEST_CONSTEXPR_CXX20 bool test() {
     s_long.assign(s_long.data(), s_long.size());
     assert(s_long == "Lorem ipsum dolor sit amet, consectetur/");
 
-    s_long.assign(s_long.data() + 2, 8 );
+    s_long.assign(s_long.data() + 2, 8);
     assert(s_long == "rem ipsu");
   }
-
   return true;
 }
 
-int main(int, char**)
-{
+int main(int, char**) {
   test();
 #if TEST_STD_VER > 17
   static_assert(test());

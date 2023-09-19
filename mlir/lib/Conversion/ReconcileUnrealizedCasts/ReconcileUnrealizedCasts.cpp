@@ -7,11 +7,16 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
-#include "../PassDetail.h"
+
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
+
+namespace mlir {
+#define GEN_PASS_DEF_RECONCILEUNREALIZEDCASTS
+#include "mlir/Conversion/Passes.h.inc"
+} // namespace mlir
 
 using namespace mlir;
 
@@ -22,7 +27,7 @@ namespace {
 /// For example, the DAGs `A -> B -> C -> B -> A` and `A -> B -> C -> A`
 /// represent a noop within the IR, and thus the initial input values can be
 /// propagated.
-/// The same does not hold for 'open' chains chains of casts, such as
+/// The same does not hold for 'open' chains of casts, such as
 /// `A -> B -> C`. In this last case there is no cycle among the types and thus
 /// the conversion is incomplete. The same hold for 'closed' chains like
 /// `A -> B -> A`, but with the result of type `B` being used by some non-cast
@@ -103,7 +108,7 @@ struct UnrealizedConversionCastPassthrough
 
 /// Pass to simplify and eliminate unrealized conversion casts.
 struct ReconcileUnrealizedCasts
-    : public ReconcileUnrealizedCastsBase<ReconcileUnrealizedCasts> {
+    : public impl::ReconcileUnrealizedCastsBase<ReconcileUnrealizedCasts> {
   ReconcileUnrealizedCasts() = default;
 
   void runOnOperation() override {

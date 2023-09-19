@@ -59,9 +59,9 @@ subroutine while_inside_do_loop
 
   ! CHECK: ^[[EXIT1]]:  // pred: ^[[HDR1]]
   ! CHECK: %[[IPRINT:.*]] = fir.load %[[I_REF]] : !fir.ref<i32>
-  ! CHECK: fir.call @_FortranAioOutputInteger32(%{{.*}}, %[[IPRINT]]) : (!fir.ref<i8>, i32) -> i1
+  ! CHECK: fir.call @_FortranAioOutputInteger32(%{{.*}}, %[[IPRINT]]) {{.*}}: (!fir.ref<i8>, i32) -> i1
   ! CHECK: %[[JPRINT:.*]] = fir.load %[[J_REF]] : !fir.ref<i32>
-  ! CHECK: fir.call @_FortranAioOutputInteger32(%{{.*}}, %[[JPRINT]]) : (!fir.ref<i8>, i32) -> i1
+  ! CHECK: fir.call @_FortranAioOutputInteger32(%{{.*}}, %[[JPRINT]]) {{.*}}: (!fir.ref<i8>, i32) -> i1
   print *, i, j
 end subroutine
 
@@ -101,7 +101,8 @@ subroutine do_inside_while_loop
         ! CHECK: fir.store %[[JINC]] to %[[J_REF]] : !fir.ref<i32>
         ! CHECK: %[[IINC:.*]] = arith.addi %[[IDX]], %[[C1]] : index
         ! CHECK: %[[I_STEPCAST:.*]] = fir.convert %[[C1]] : (index) -> i32
-        ! CHECK: %[[I_IVINC:.*]] = arith.addi %[[I_IV]], %[[I_STEPCAST]] : i32
+        ! CHECK: %[[I_IVLOAD:.*]] = fir.load %[[I_REF]] : !fir.ref<i32>
+        ! CHECK: %[[I_IVINC:.*]] = arith.addi %[[I_IVLOAD]], %[[I_STEPCAST]] : i32
         ! CHECK: fir.result %[[IINC]], %[[I_IVINC]] : index, i32
       do i=8,13
         j=j*2
@@ -114,8 +115,8 @@ subroutine do_inside_while_loop
 
   ! CHECK: ^[[EXIT1]]:  // pred: ^[[HDR1]]
   ! CHECK: %[[IPRINT:.*]] = fir.load %[[I_REF]] : !fir.ref<i32>
-  ! CHECK: fir.call @_FortranAioOutputInteger32(%{{.*}}, %[[IPRINT]]) : (!fir.ref<i8>, i32) -> i1
+  ! CHECK: fir.call @_FortranAioOutputInteger32(%{{.*}}, %[[IPRINT]]) {{.*}}: (!fir.ref<i8>, i32) -> i1
   ! CHECK: %[[JPRINT:.*]] = fir.load %[[J_REF]] : !fir.ref<i32>
-  ! CHECK: fir.call @_FortranAioOutputInteger32(%{{.*}}, %[[JPRINT]]) : (!fir.ref<i8>, i32) -> i1
+  ! CHECK: fir.call @_FortranAioOutputInteger32(%{{.*}}, %[[JPRINT]]) {{.*}}: (!fir.ref<i8>, i32) -> i1
   print *, i, j
 end subroutine

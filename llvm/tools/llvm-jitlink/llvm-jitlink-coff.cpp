@@ -25,8 +25,8 @@ static bool isCOFFGOTSection(Section &S) { return S.getName() == "$__GOT"; }
 static bool isCOFFStubsSection(Section &S) { return S.getName() == "$__STUBS"; }
 
 static Expected<Edge &> getFirstRelocationEdge(LinkGraph &G, Block &B) {
-  auto EItr = std::find_if(B.edges().begin(), B.edges().end(),
-                           [](Edge &E) { return E.isRelocation(); });
+  auto EItr =
+      llvm::find_if(B.edges(), [](Edge &E) { return E.isRelocation(); });
   if (EItr == B.edges().end())
     return make_error<StringError>("GOT entry in " + G.getName() + ", \"" +
                                        B.getSection().getName() +
@@ -80,13 +80,12 @@ Error registerCOFFGraphInfo(Session &S, LinkGraph &G) {
   for (auto &Sec : G.sections()) {
     LLVM_DEBUG({
       dbgs() << "  Section \"" << Sec.getName() << "\": "
-             << (llvm::empty(Sec.symbols()) ? "empty. skipping."
-                                            : "processing...")
+             << (Sec.symbols().empty() ? "empty. skipping." : "processing...")
              << "\n";
     });
 
     // Skip empty sections.
-    if (llvm::empty(Sec.symbols()))
+    if (Sec.symbols().empty())
       continue;
 
     if (FileInfo.SectionInfos.count(Sec.getName()))
@@ -119,7 +118,8 @@ Error registerCOFFGraphInfo(Session &S, LinkGraph &G) {
         if (Sym->getSize() != 0) {
           if (auto TS = getCOFFGOTTarget(G, Sym->getBlock()))
             FileInfo.GOTEntryInfos[TS->getName()] = {
-                Sym->getSymbolContent(), Sym->getAddress().getValue()};
+                Sym->getSymbolContent(), Sym->getAddress().getValue(),
+                Sym->getTargetFlags()};
           else
             return TS.takeError();
         }
@@ -131,7 +131,8 @@ Error registerCOFFGraphInfo(Session &S, LinkGraph &G) {
 
         if (auto TS = getCOFFStubTarget(G, Sym->getBlock()))
           FileInfo.StubInfos[TS->getName()] = {Sym->getSymbolContent(),
-                                               Sym->getAddress().getValue()};
+                                               Sym->getAddress().getValue(),
+                                               Sym->getTargetFlags()};
         else
           return TS.takeError();
         SectionContainsContent = true;
@@ -144,7 +145,8 @@ Error registerCOFFGraphInfo(Session &S, LinkGraph &G) {
           SectionContainsZeroFill = true;
         } else {
           S.SymbolInfos[Sym->getName()] = {Sym->getSymbolContent(),
-                                           Sym->getAddress().getValue()};
+                                           Sym->getAddress().getValue(),
+                                           Sym->getTargetFlags()};
           SectionContainsContent = true;
         }
       }
@@ -165,7 +167,7 @@ Error registerCOFFGraphInfo(Session &S, LinkGraph &G) {
     else
       FileInfo.SectionInfos[Sec.getName()] = {
           ArrayRef<char>(FirstSym->getBlock().getContent().data(), SecSize),
-          SecAddr.getValue()};
+          SecAddr.getValue(), FirstSym->getTargetFlags()};
   }
 
   return Error::success();

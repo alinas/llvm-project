@@ -24,6 +24,7 @@
 #include "Writer.h"
 
 #include "lld/Common/Args.h"
+#include "lld/Common/CommonLinkerContext.h"
 #include "lld/Common/Driver.h"
 #include "lld/Common/ErrorHandler.h"
 #include "lld/Common/LLVM.h"
@@ -41,13 +42,13 @@
 #include "llvm/Option/ArgList.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
-#include "llvm/Support/Host.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Parallel.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/TarWriter.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/TimeProfiler.h"
+#include "llvm/TargetParser/Host.h"
 #include "llvm/TextAPI/PackedVersion.h"
 
 #include <algorithm>
@@ -82,7 +83,7 @@ static HeaderFileType getOutputType(const InputArgList &args) {
 }
 
 static DenseMap<CachedHashStringRef, StringRef> resolvedLibraries;
-static Optional<StringRef> findLibrary(StringRef name) {
+static std::optional<StringRef> findLibrary(StringRef name) {
   CachedHashStringRef key(name);
   auto entry = resolvedLibraries.find(key);
   if (entry != resolvedLibraries.end())
@@ -90,17 +91,18 @@ static Optional<StringRef> findLibrary(StringRef name) {
 
   auto doFind = [&] {
     if (config->searchDylibsFirst) {
-      if (Optional<StringRef> path = findPathCombination(
-              "lib" + name, config->librarySearchPaths, {".tbd", ".dylib"}))
+      if (std::optional<StringRef> path =
+              findPathCombination("lib" + name, config->librarySearchPaths,
+                                  {".tbd", ".dylib", ".so"}))
         return path;
       return findPathCombination("lib" + name, config->librarySearchPaths,
                                  {".a"});
     }
     return findPathCombination("lib" + name, config->librarySearchPaths,
-                               {".tbd", ".dylib", ".a"});
+                               {".tbd", ".dylib", ".so", ".a"});
   };
 
-  Optional<StringRef> path = doFind();
+  std::optional<StringRef> path = doFind();
   if (path)
     resolvedLibraries[key] = *path;
 
@@ -108,7 +110,7 @@ static Optional<StringRef> findLibrary(StringRef name) {
 }
 
 static DenseMap<CachedHashStringRef, StringRef> resolvedFrameworks;
-static Optional<StringRef> findFramework(StringRef name) {
+static std::optional<StringRef> findFramework(StringRef name) {
   CachedHashStringRef key(name);
   auto entry = resolvedFrameworks.find(key);
   if (entry != resolvedFrameworks.end())
@@ -134,7 +136,7 @@ static Optional<StringRef> findFramework(StringRef name) {
       // Suffix lookup failed, fall through to the no-suffix case.
     }
 
-    if (Optional<StringRef> path = resolveDylibPath(symlink.str()))
+    if (std::optional<StringRef> path = resolveDylibPath(symlink.str()))
       return resolvedFrameworks[key] = *path;
   }
   return {};
@@ -268,7 +270,7 @@ static InputFile *addFile(StringRef path, LoadType loadType,
                           bool isLazy = false, bool isExplicit = true,
                           bool isBundleLoader = false,
                           bool isForceHidden = false) {
-  Optional<MemoryBufferRef> buffer = readFile(path);
+  std::optional<MemoryBufferRef> buffer = readFile(path);
   if (!buffer)
     return nullptr;
   MemoryBufferRef mbref = *buffer;
@@ -306,10 +308,10 @@ static InputFile *addFile(StringRef path, LoadType loadType,
 
     bool isLCLinkerForceLoad = loadType == LoadType::LCLinkerOption &&
                                config->forceLoadSwift &&
-                               path::filename(path).startswith("libswift");
+                               path::filename(path).starts_with("libswift");
     if ((isCommandLineLoad && config->allLoad) ||
         loadType == LoadType::CommandLineForce || isLCLinkerForceLoad) {
-      if (Optional<MemoryBufferRef> buffer = readFile(path)) {
+      if (readFile(path)) {
         Error e = Error::success();
         for (const object::Archive::Child &c : file->getArchive().children(e)) {
           StringRef reason;
@@ -334,12 +336,12 @@ static InputFile *addFile(StringRef path, LoadType loadType,
       }
     } else if (isCommandLineLoad && config->forceLoadObjC) {
       for (const object::Archive::Symbol &sym : file->getArchive().symbols())
-        if (sym.getName().startswith(objc::klass))
+        if (sym.getName().starts_with(objc::klass))
           file->fetch(sym);
 
       // TODO: no need to look for ObjC sections for a given archive member if
       // we already found that it contains an ObjC symbol.
-      if (Optional<MemoryBufferRef> buffer = readFile(path)) {
+      if (readFile(path)) {
         Error e = Error::success();
         for (const object::Archive::Child &c : file->getArchive().children(e)) {
           Expected<MemoryBufferRef> mb = c.getMemoryBufferRef();
@@ -389,7 +391,7 @@ static InputFile *addFile(StringRef path, LoadType loadType,
     if ((isa<ObjFile>(newFile) || isa<BitcodeFile>(newFile)) && newFile->lazy &&
         config->forceLoadObjC) {
       for (Symbol *sym : newFile->symbols)
-        if (sym && sym->getName().startswith(objc::klass)) {
+        if (sym && sym->getName().starts_with(objc::klass)) {
           extract(*newFile, "-ObjC");
           break;
         }
@@ -406,10 +408,11 @@ static InputFile *addFile(StringRef path, LoadType loadType,
   return newFile;
 }
 
+static std::vector<StringRef> missingAutolinkWarnings;
 static void addLibrary(StringRef name, bool isNeeded, bool isWeak,
                        bool isReexport, bool isHidden, bool isExplicit,
                        LoadType loadType) {
-  if (Optional<StringRef> path = findLibrary(name)) {
+  if (std::optional<StringRef> path = findLibrary(name)) {
     if (auto *dylibFile = dyn_cast_or_null<DylibFile>(
             addFile(*path, loadType, /*isLazy=*/false, isExplicit,
                     /*isBundleLoader=*/false, isHidden))) {
@@ -424,13 +427,18 @@ static void addLibrary(StringRef name, bool isNeeded, bool isWeak,
     }
     return;
   }
+  if (loadType == LoadType::LCLinkerOption) {
+    missingAutolinkWarnings.push_back(
+        saver().save("auto-linked library not found for -l" + name));
+    return;
+  }
   error("library not found for -l" + name);
 }
 
 static DenseSet<StringRef> loadedObjectFrameworks;
 static void addFramework(StringRef name, bool isNeeded, bool isWeak,
                          bool isReexport, bool isExplicit, LoadType loadType) {
-  if (Optional<StringRef> path = findFramework(name)) {
+  if (std::optional<StringRef> path = findFramework(name)) {
     if (loadedObjectFrameworks.contains(*path))
       return;
 
@@ -456,13 +464,23 @@ static void addFramework(StringRef name, bool isNeeded, bool isWeak,
     }
     return;
   }
+  if (loadType == LoadType::LCLinkerOption) {
+    missingAutolinkWarnings.push_back(
+        saver().save("auto-linked framework not found for -framework " + name));
+    return;
+  }
   error("framework not found for -framework " + name);
 }
 
 // Parses LC_LINKER_OPTION contents, which can add additional command line
 // flags. This directly parses the flags instead of using the standard argument
 // parser to improve performance.
-void macho::parseLCLinkerOption(InputFile *f, unsigned argc, StringRef data) {
+void macho::parseLCLinkerOption(
+    llvm::SmallVectorImpl<StringRef> &LCLinkerOptions, InputFile *f,
+    unsigned argc, StringRef data) {
+  if (config->ignoreAutoLink)
+    return;
+
   SmallVector<StringRef, 4> argv;
   size_t offset = 0;
   for (unsigned i = 0; i < argc && offset < data.size(); ++i) {
@@ -475,21 +493,48 @@ void macho::parseLCLinkerOption(InputFile *f, unsigned argc, StringRef data) {
   unsigned i = 0;
   StringRef arg = argv[i];
   if (arg.consume_front("-l")) {
-    addLibrary(arg, /*isNeeded=*/false, /*isWeak=*/false,
-               /*isReexport=*/false, /*isHidden=*/false, /*isExplicit=*/false,
-               LoadType::LCLinkerOption);
+    if (config->ignoreAutoLinkOptions.contains(arg))
+      return;
   } else if (arg == "-framework") {
     StringRef name = argv[++i];
-    addFramework(name, /*isNeeded=*/false, /*isWeak=*/false,
-                 /*isReexport=*/false, /*isExplicit=*/false,
-                 LoadType::LCLinkerOption);
+    if (config->ignoreAutoLinkOptions.contains(name))
+      return;
   } else {
     error(arg + " is not allowed in LC_LINKER_OPTION");
+  }
+
+  LCLinkerOptions.append(argv);
+}
+
+void macho::resolveLCLinkerOptions() {
+  while (!unprocessedLCLinkerOptions.empty()) {
+    SmallVector<StringRef> LCLinkerOptions(unprocessedLCLinkerOptions);
+    unprocessedLCLinkerOptions.clear();
+
+    for (unsigned i = 0; i < LCLinkerOptions.size(); ++i) {
+      StringRef arg = LCLinkerOptions[i];
+      if (arg.consume_front("-l")) {
+        if (config->ignoreAutoLinkOptions.contains(arg))
+          continue;
+        addLibrary(arg, /*isNeeded=*/false, /*isWeak=*/false,
+                   /*isReexport=*/false, /*isHidden=*/false,
+                   /*isExplicit=*/false, LoadType::LCLinkerOption);
+      } else if (arg == "-framework") {
+        StringRef name = LCLinkerOptions[++i];
+        if (config->ignoreAutoLinkOptions.contains(name))
+          continue;
+        addFramework(name, /*isNeeded=*/false, /*isWeak=*/false,
+                     /*isReexport=*/false, /*isExplicit=*/false,
+                     LoadType::LCLinkerOption);
+      } else {
+        error(arg + " is not allowed in LC_LINKER_OPTION");
+      }
+    }
   }
 }
 
 static void addFileList(StringRef path, bool isLazy) {
-  Optional<MemoryBufferRef> buffer = readFile(path);
+  std::optional<MemoryBufferRef> buffer = readFile(path);
   if (!buffer)
     return;
   MemoryBufferRef mbref = *buffer;
@@ -570,10 +615,10 @@ static void replaceCommonSymbols() {
     // FIXME: CommonSymbol should store isReferencedDynamically, noDeadStrip
     // and pass them on here.
     replaceSymbol<Defined>(
-        sym, sym->getName(), common->getFile(), isec, /*value=*/0, /*size=*/0,
+        sym, sym->getName(), common->getFile(), isec, /*value=*/0, common->size,
         /*isWeakDef=*/false, /*isExternal=*/true, common->privateExtern,
-        /*includeInSymtab=*/true, /*isThumb=*/false,
-        /*isReferencedDynamically=*/false, /*noDeadStrip=*/false);
+        /*includeInSymtab=*/true, /*isReferencedDynamically=*/false,
+        /*noDeadStrip=*/false);
   }
 }
 
@@ -658,8 +703,9 @@ static PlatformVersion parsePlatformVersion(const Arg *arg) {
   return platformVersion;
 }
 
-// Has the side-effect of setting Config::platformInfo.
-static PlatformType parsePlatformVersions(const ArgList &args) {
+// Has the side-effect of setting Config::platformInfo and
+// potentially Config::secondaryPlatformInfo.
+static void setPlatformVersions(StringRef archName, const ArgList &args) {
   std::map<PlatformType, PlatformVersion> platformVersions;
   const PlatformVersion *lastVersionInfo = nullptr;
   for (const Arg *arg : args.filtered(OPT_platform_version)) {
@@ -675,11 +721,11 @@ static PlatformType parsePlatformVersions(const ArgList &args) {
 
   if (platformVersions.empty()) {
     error("must specify -platform_version");
-    return PLATFORM_UNKNOWN;
+    return;
   }
   if (platformVersions.size() > 2) {
     error("must specify -platform_version at most twice");
-    return PLATFORM_UNKNOWN;
+    return;
   }
   if (platformVersions.size() == 2) {
     bool isZipperedCatalyst = platformVersions.count(PLATFORM_MACOS) &&
@@ -691,21 +737,23 @@ static PlatformType parsePlatformVersions(const ArgList &args) {
     } else if (config->outputType != MH_DYLIB &&
                config->outputType != MH_BUNDLE) {
       error("writing zippered outputs only valid for -dylib and -bundle");
-    } else {
-      config->platformInfo.minimum = platformVersions[PLATFORM_MACOS].minimum;
-      config->platformInfo.sdk = platformVersions[PLATFORM_MACOS].sdk;
-      config->secondaryPlatformInfo = PlatformInfo{};
-      config->secondaryPlatformInfo->minimum =
-          platformVersions[PLATFORM_MACCATALYST].minimum;
-      config->secondaryPlatformInfo->sdk =
-          platformVersions[PLATFORM_MACCATALYST].sdk;
     }
-    return PLATFORM_MACOS;
+
+    config->platformInfo = {
+        MachO::Target(getArchitectureFromName(archName), PLATFORM_MACOS,
+                      platformVersions[PLATFORM_MACOS].minimum),
+        platformVersions[PLATFORM_MACOS].sdk};
+    config->secondaryPlatformInfo = {
+        MachO::Target(getArchitectureFromName(archName), PLATFORM_MACCATALYST,
+                      platformVersions[PLATFORM_MACCATALYST].minimum),
+        platformVersions[PLATFORM_MACCATALYST].sdk};
+    return;
   }
 
-  config->platformInfo.minimum = lastVersionInfo->minimum;
-  config->platformInfo.sdk = lastVersionInfo->sdk;
-  return lastVersionInfo->platform;
+  config->platformInfo = {MachO::Target(getArchitectureFromName(archName),
+                                        lastVersionInfo->platform,
+                                        lastVersionInfo->minimum),
+                          lastVersionInfo->sdk};
 }
 
 // Has the side-effect of setting Config::target.
@@ -716,14 +764,7 @@ static TargetInfo *createTargetInfo(InputArgList &args) {
     return nullptr;
   }
 
-  PlatformType platform = parsePlatformVersions(args);
-  config->platformInfo.target =
-      MachO::Target(getArchitectureFromName(archName), platform);
-  if (config->secondaryPlatformInfo) {
-    config->secondaryPlatformInfo->target =
-        MachO::Target(getArchitectureFromName(archName), PLATFORM_MACCATALYST);
-  }
-
+  setPlatformVersions(archName, args);
   auto [cpuType, cpuSubtype] = getCPUTypeFromArchitecture(config->arch());
   switch (cpuType) {
   case CPU_TYPE_X86_64:
@@ -732,8 +773,6 @@ static TargetInfo *createTargetInfo(InputArgList &args) {
     return createARM64TargetInfo();
   case CPU_TYPE_ARM64_32:
     return createARM64_32TargetInfo();
-  case CPU_TYPE_ARM:
-    return createARMTargetInfo(cpuSubtype);
   default:
     error("missing or unsupported -arch " + archName);
     return nullptr;
@@ -758,9 +797,9 @@ getUndefinedSymbolTreatment(const ArgList &args) {
              (treatment == UndefinedSymbolTreatment::warning ||
               treatment == UndefinedSymbolTreatment::suppress)) {
     if (treatment == UndefinedSymbolTreatment::warning)
-      error("'-undefined warning' only valid with '-flat_namespace'");
+      fatal("'-undefined warning' only valid with '-flat_namespace'");
     else
-      error("'-undefined suppress' only valid with '-flat_namespace'");
+      fatal("'-undefined suppress' only valid with '-flat_namespace'");
     treatment = UndefinedSymbolTreatment::error;
   }
   return treatment;
@@ -834,6 +873,28 @@ static const char *getReproduceOption(InputArgList &args) {
   return getenv("LLD_REPRODUCE");
 }
 
+// Parse options of the form "old;new".
+static std::pair<StringRef, StringRef> getOldNewOptions(opt::InputArgList &args,
+                                                        unsigned id) {
+  auto *arg = args.getLastArg(id);
+  if (!arg)
+    return {"", ""};
+
+  StringRef s = arg->getValue();
+  std::pair<StringRef, StringRef> ret = s.split(';');
+  if (ret.second.empty())
+    error(arg->getSpelling() + " expects 'old;new' format, but got " + s);
+  return ret;
+}
+
+// Parse options of the form "old;new[;extra]".
+static std::tuple<StringRef, StringRef, StringRef>
+getOldNewOptionsExtra(opt::InputArgList &args, unsigned id) {
+  auto [oldDir, second] = getOldNewOptions(args, id);
+  auto [newDir, extraDir] = second.split(';');
+  return {oldDir, newDir, extraDir};
+}
+
 static void parseClangOption(StringRef opt, const Twine &msg) {
   std::string err;
   raw_string_ostream os(err);
@@ -893,7 +954,7 @@ static std::vector<SectionAlign> parseSectAlign(const opt::InputArgList &args) {
     StringRef segName = arg->getValue(0);
     StringRef sectName = arg->getValue(1);
     StringRef alignStr = arg->getValue(2);
-    if (alignStr.startswith("0x") || alignStr.startswith("0X"))
+    if (alignStr.starts_with("0x") || alignStr.starts_with("0X"))
       alignStr = alignStr.drop_front(2);
     uint32_t align;
     if (alignStr.getAsInteger(16, align)) {
@@ -924,23 +985,37 @@ PlatformType macho::removeSimulator(PlatformType platform) {
   }
 }
 
+static bool supportsNoPie() {
+  return !(config->arch() == AK_arm64 || config->arch() == AK_arm64e ||
+           config->arch() == AK_arm64_32);
+}
+
+static bool shouldAdhocSignByDefault(Architecture arch, PlatformType platform) {
+  if (arch != AK_arm64 && arch != AK_arm64e)
+    return false;
+
+  return platform == PLATFORM_MACOS || platform == PLATFORM_IOSSIMULATOR ||
+         platform == PLATFORM_TVOSSIMULATOR ||
+         platform == PLATFORM_WATCHOSSIMULATOR;
+}
+
 static bool dataConstDefault(const InputArgList &args) {
-  static const std::vector<std::pair<PlatformType, VersionTuple>> minVersion = {
-      {PLATFORM_MACOS, VersionTuple(10, 15)},
-      {PLATFORM_IOS, VersionTuple(13, 0)},
-      {PLATFORM_TVOS, VersionTuple(13, 0)},
-      {PLATFORM_WATCHOS, VersionTuple(6, 0)},
-      {PLATFORM_BRIDGEOS, VersionTuple(4, 0)}};
+  static const std::array<std::pair<PlatformType, VersionTuple>, 5> minVersion =
+      {{{PLATFORM_MACOS, VersionTuple(10, 15)},
+        {PLATFORM_IOS, VersionTuple(13, 0)},
+        {PLATFORM_TVOS, VersionTuple(13, 0)},
+        {PLATFORM_WATCHOS, VersionTuple(6, 0)},
+        {PLATFORM_BRIDGEOS, VersionTuple(4, 0)}}};
   PlatformType platform = removeSimulator(config->platformInfo.target.Platform);
   auto it = llvm::find_if(minVersion,
                           [&](const auto &p) { return p.first == platform; });
   if (it != minVersion.end())
-    if (config->platformInfo.minimum < it->second)
+    if (config->platformInfo.target.MinDeployment < it->second)
       return false;
 
   switch (config->outputType) {
   case MH_EXECUTE:
-    return !args.hasArg(OPT_no_pie);
+    return !(args.hasArg(OPT_no_pie) && supportsNoPie());
   case MH_BUNDLE:
     // FIXME: return false when -final_name ...
     // has prefix "/System/Library/UserEventPlugins/"
@@ -955,6 +1030,48 @@ static bool dataConstDefault(const InputArgList &args) {
         "unsupported output type for determining data-const default");
   }
   return false;
+}
+
+static bool shouldEmitChainedFixups(const InputArgList &args) {
+  const Arg *arg = args.getLastArg(OPT_fixup_chains, OPT_no_fixup_chains);
+  if (arg && arg->getOption().matches(OPT_no_fixup_chains))
+    return false;
+
+  bool isRequested = arg != nullptr;
+
+  // Version numbers taken from the Xcode 13.3 release notes.
+  static const std::array<std::pair<PlatformType, VersionTuple>, 4> minVersion =
+      {{{PLATFORM_MACOS, VersionTuple(11, 0)},
+        {PLATFORM_IOS, VersionTuple(13, 4)},
+        {PLATFORM_TVOS, VersionTuple(14, 0)},
+        {PLATFORM_WATCHOS, VersionTuple(7, 0)}}};
+  PlatformType platform = removeSimulator(config->platformInfo.target.Platform);
+  auto it = llvm::find_if(minVersion,
+                          [&](const auto &p) { return p.first == platform; });
+  if (it != minVersion.end() &&
+      it->second > config->platformInfo.target.MinDeployment) {
+    if (!isRequested)
+      return false;
+
+    warn("-fixup_chains requires " + getPlatformName(config->platform()) + " " +
+         it->second.getAsString() + ", which is newer than target minimum of " +
+         config->platformInfo.target.MinDeployment.getAsString());
+  }
+
+  if (!is_contained({AK_x86_64, AK_x86_64h, AK_arm64}, config->arch())) {
+    if (isRequested)
+      error("-fixup_chains is only supported on x86_64 and arm64 targets");
+    return false;
+  }
+
+  if (!config->isPic) {
+    if (isRequested)
+      error("-fixup_chains is incompatible with -no_pie");
+    return false;
+  }
+
+  // TODO: Enable by default once stable.
+  return isRequested;
 }
 
 void SymbolPatterns::clear() {
@@ -989,7 +1106,7 @@ bool SymbolPatterns::match(StringRef symbolName) const {
 static void parseSymbolPatternsFile(const Arg *arg,
                                     SymbolPatterns &symbolPatterns) {
   StringRef path = arg->getValue();
-  Optional<MemoryBufferRef> buffer = readFile(path);
+  std::optional<MemoryBufferRef> buffer = readFile(path);
   if (!buffer) {
     error("Could not read symbol file: " + path);
     return;
@@ -1103,6 +1220,11 @@ static void gatherInputSections() {
         if (auto *isec = dyn_cast<ConcatInputSection>(subsection.isec)) {
           if (isec->isCoalescedWeak())
             continue;
+          if (config->emitInitOffsets &&
+              sectionType(isec->getFlags()) == S_MOD_INIT_FUNC_POINTERS) {
+            in.initOffsets->addInput(isec);
+            continue;
+          }
           isec->outSecOff = inputOrder++;
           if (!osec)
             osec = ConcatOutputSection::getOrCreateForInput(isec);
@@ -1142,8 +1264,7 @@ static void foldIdenticalLiterals() {
   // Either way, we must unconditionally finalize it here.
   in.cStringSection->finalizeContents();
   in.objcMethnameSection->finalizeContents();
-  if (in.wordLiteralSection)
-    in.wordLiteralSection->finalizeContents();
+  in.wordLiteralSection->finalizeContents();
 }
 
 static void addSynthenticMethnames() {
@@ -1152,7 +1273,7 @@ static void addSynthenticMethnames() {
   const int prefixLength = ObjCStubsSection::symbolPrefix.size();
   for (Symbol *sym : symtab->getSymbols())
     if (isa<Undefined>(sym))
-      if (sym->getName().startswith(ObjCStubsSection::symbolPrefix))
+      if (sym->getName().starts_with(ObjCStubsSection::symbolPrefix))
         os << sym->getName().drop_front(prefixLength) << '\0';
 
   if (data.empty())
@@ -1186,7 +1307,7 @@ static void referenceStubBinder() {
   // dyld_stub_binder is in libSystem.dylib, which is usually linked in. This
   // isn't needed for correctness, but the presence of that symbol suppresses
   // "no symbols" diagnostics from `nm`.
-  // StubHelperSection::setup() adds a reference and errors out if
+  // StubHelperSection::setUp() adds a reference and errors out if
   // dyld_stub_binder doesn't exist in case it is actually needed.
   symtab->addUndefined("dyld_stub_binder", /*file=*/nullptr, /*isWeak=*/false);
 }
@@ -1195,22 +1316,51 @@ static void createAliases() {
   for (const auto &pair : config->aliasedSymbols) {
     if (const auto &sym = symtab->find(pair.first)) {
       if (const auto &defined = dyn_cast<Defined>(sym)) {
-        symtab->aliasDefined(defined, pair.second);
-        continue;
+        symtab->aliasDefined(defined, pair.second, defined->getFile())
+            ->noDeadStrip = true;
+      } else {
+        error("TODO: support aliasing to symbols of kind " +
+              Twine(sym->kind()));
+      }
+    } else {
+      warn("undefined base symbol '" + pair.first + "' for alias '" +
+           pair.second + "'\n");
+    }
+  }
+
+  for (const InputFile *file : inputFiles) {
+    if (auto *objFile = dyn_cast<ObjFile>(file)) {
+      for (const AliasSymbol *alias : objFile->aliases) {
+        if (const auto &aliased = symtab->find(alias->getAliasedName())) {
+          if (const auto &defined = dyn_cast<Defined>(aliased)) {
+            symtab->aliasDefined(defined, alias->getName(), alias->getFile(),
+                                 alias->privateExtern);
+          } else {
+            // Common, dylib, and undefined symbols are all valid alias
+            // referents (undefineds can become valid Defined symbols later on
+            // in the link.)
+            error("TODO: support aliasing to symbols of kind " +
+                  Twine(aliased->kind()));
+          }
+        } else {
+          // This shouldn't happen since MC generates undefined symbols to
+          // represent the alias referents. Thus we fatal() instead of just
+          // warning here.
+          fatal("unable to find alias referent " + alias->getAliasedName() +
+                " for " + alias->getName());
+        }
       }
     }
-
-    warn("undefined base symbol '" + pair.first + "' for alias '" +
-         pair.second + "'\n");
   }
 }
 
 static void handleExplicitExports() {
+  static constexpr int kMaxWarnings = 3;
   if (config->hasExplicitExports) {
-    parallelForEach(symtab->getSymbols(), [](Symbol *sym) {
+    std::atomic<uint64_t> warningsCount{0};
+    parallelForEach(symtab->getSymbols(), [&warningsCount](Symbol *sym) {
       if (auto *defined = dyn_cast<Defined>(sym)) {
-        StringRef symbolName = defined->getName();
-        if (config->exportedSymbols.match(symbolName)) {
+        if (config->exportedSymbols.match(sym->getName())) {
           if (defined->privateExtern) {
             if (defined->weakDefCanBeHidden) {
               // weak_def_can_be_hidden symbols behave similarly to
@@ -1219,15 +1369,24 @@ static void handleExplicitExports() {
               // The former can be exported but the latter cannot.
               defined->privateExtern = false;
             } else {
-              warn("cannot export hidden symbol " + toString(*defined) +
-                   "\n>>> defined in " + toString(defined->getFile()));
+              // Only print the first 3 warnings verbosely, and
+              // shorten the rest to avoid crowding logs.
+              if (warningsCount.fetch_add(1, std::memory_order_relaxed) <
+                  kMaxWarnings)
+                warn("cannot export hidden symbol " + toString(*defined) +
+                     "\n>>> defined in " + toString(defined->getFile()));
             }
           }
         } else {
           defined->privateExtern = true;
         }
+      } else if (auto *dysym = dyn_cast<DylibSymbol>(sym)) {
+        dysym->shouldReexport = config->exportedSymbols.match(sym->getName());
       }
     });
+    if (warningsCount > kMaxWarnings)
+      warn("<... " + Twine(warningsCount - kMaxWarnings) +
+           " more similar warnings...>");
   } else if (!config->unexportedSymbols.empty()) {
     parallelForEach(symtab->getSymbols(), [](Symbol *sym) {
       if (auto *defined = dyn_cast<Defined>(sym))
@@ -1237,9 +1396,10 @@ static void handleExplicitExports() {
   }
 }
 
-bool macho::link(ArrayRef<const char *> argsArr, llvm::raw_ostream &stdoutOS,
-                 llvm::raw_ostream &stderrOS, bool exitEarly,
-                 bool disableOutput) {
+namespace lld {
+namespace macho {
+bool link(ArrayRef<const char *> argsArr, llvm::raw_ostream &stdoutOS,
+          llvm::raw_ostream &stderrOS, bool exitEarly, bool disableOutput) {
   // This driver-specific context will be freed later by lldMain().
   auto *ctx = new CommonLinkerContext;
 
@@ -1253,8 +1413,10 @@ bool macho::link(ArrayRef<const char *> argsArr, llvm::raw_ostream &stdoutOS,
     inputSections.clear();
     loadedArchives.clear();
     loadedObjectFrameworks.clear();
+    missingAutolinkWarnings.clear();
     syntheticSections.clear();
     thunkMap.clear();
+    unprocessedLCLinkerOptions.clear();
 
     firstTLVDataSection = nullptr;
     tar = nullptr;
@@ -1295,6 +1457,17 @@ bool macho::link(ArrayRef<const char *> argsArr, llvm::raw_ostream &stdoutOS,
   target = createTargetInfo(args);
   depTracker = std::make_unique<DependencyTracker>(
       args.getLastArgValue(OPT_dependency_info));
+
+  config->ltoo = args::getInteger(args, OPT_lto_O, 2);
+  if (config->ltoo > 3)
+    error("--lto-O: invalid optimization level: " + Twine(config->ltoo));
+  unsigned ltoCgo =
+      args::getInteger(args, OPT_lto_CGO, args::getCGOptLevel(config->ltoo));
+  if (auto level = CodeGenOpt::getLevel(ltoCgo))
+    config->ltoCgo = *level;
+  else
+    error("--lto-CGO: invalid codegen optimization level: " + Twine(ltoCgo));
+
   if (errorCount())
     return false;
 
@@ -1302,11 +1475,11 @@ bool macho::link(ArrayRef<const char *> argsArr, llvm::raw_ostream &stdoutOS,
     uint64_t pagezeroSize = args::getHex(args, OPT_pagezero_size, 0);
 
     // ld64 does something really weird. It attempts to realign the value to the
-    // page size, but assumes the the page size is 4K. This doesn't work with
-    // most of Apple's ARM64 devices, which use a page size of 16K. This means
-    // that it will first 4K align it by rounding down, then round up to 16K.
-    // This probably only happened because no one using this arg with anything
-    // other then 0, so no one checked if it did what is what it says it does.
+    // page size, but assumes the page size is 4K. This doesn't work with most
+    // of Apple's ARM64 devices, which use a page size of 16K. This means that
+    // it will first 4K align it by rounding down, then round up to 16K.  This
+    // probably only happened because no one using this arg with anything other
+    // then 0, so no one checked if it did what is what it says it does.
 
     // So we are not copying this weird behavior and doing the it in a logical
     // way, by always rounding down to page size.
@@ -1338,11 +1511,21 @@ bool macho::link(ArrayRef<const char *> argsArr, llvm::raw_ostream &stdoutOS,
       StringRef sep = sys::path::get_separator();
       // real_path removes trailing slashes as part of the normalization, but
       // these are meaningful for our text based stripping
-      if (config->osoPrefix.equals(".") || config->osoPrefix.endswith(sep))
+      if (config->osoPrefix.equals(".") || config->osoPrefix.ends_with(sep))
         expanded += sep;
       config->osoPrefix = saver().save(expanded.str());
     }
   }
+
+  bool pie = args.hasFlag(OPT_pie, OPT_no_pie, true);
+  if (!supportsNoPie() && !pie) {
+    warn("-no_pie ignored for arm64");
+    pie = true;
+  }
+
+  config->isPic = config->outputType == MH_DYLIB ||
+                  config->outputType == MH_BUNDLE ||
+                  (config->outputType == MH_EXECUTE && pie);
 
   // Must be set before any InputSections and Symbols are created.
   config->deadStrip = args.hasArg(OPT_dead_strip);
@@ -1405,17 +1588,50 @@ bool macho::link(ArrayRef<const char *> argsArr, llvm::raw_ostream &stdoutOS,
     addFile(arg->getValue(), LoadType::CommandLine, /*isLazy=*/false,
             /*isExplicit=*/false, /*isBundleLoader=*/true);
   }
+  for (auto *arg : args.filtered(OPT_dyld_env)) {
+    StringRef envPair(arg->getValue());
+    if (!envPair.contains('='))
+      error("-dyld_env's argument is  malformed. Expected "
+            "-dyld_env <ENV_VAR>=<VALUE>, got `" +
+            envPair + "`");
+    config->dyldEnvs.push_back(envPair);
+  }
+  if (!config->dyldEnvs.empty() && config->outputType != MH_EXECUTE)
+    error("-dyld_env can only be used when creating executable output");
+
   if (const Arg *arg = args.getLastArg(OPT_umbrella)) {
     if (config->outputType != MH_DYLIB)
       warn("-umbrella used, but not creating dylib");
     config->umbrella = arg->getValue();
   }
   config->ltoObjPath = args.getLastArgValue(OPT_object_path_lto);
-  config->ltoo = args::getInteger(args, OPT_lto_O, 2);
-  if (config->ltoo > 3)
-    error("--lto-O: invalid optimization level: " + Twine(config->ltoo));
   config->thinLTOCacheDir = args.getLastArgValue(OPT_cache_path_lto);
   config->thinLTOCachePolicy = getLTOCachePolicy(args);
+  config->thinLTOEmitImportsFiles = args.hasArg(OPT_thinlto_emit_imports_files);
+  config->thinLTOEmitIndexFiles = args.hasArg(OPT_thinlto_emit_index_files) ||
+                                  args.hasArg(OPT_thinlto_index_only) ||
+                                  args.hasArg(OPT_thinlto_index_only_eq);
+  config->thinLTOIndexOnly = args.hasArg(OPT_thinlto_index_only) ||
+                             args.hasArg(OPT_thinlto_index_only_eq);
+  config->thinLTOIndexOnlyArg = args.getLastArgValue(OPT_thinlto_index_only_eq);
+  config->thinLTOObjectSuffixReplace =
+      getOldNewOptions(args, OPT_thinlto_object_suffix_replace_eq);
+  std::tie(config->thinLTOPrefixReplaceOld, config->thinLTOPrefixReplaceNew,
+           config->thinLTOPrefixReplaceNativeObject) =
+      getOldNewOptionsExtra(args, OPT_thinlto_prefix_replace_eq);
+  if (config->thinLTOEmitIndexFiles && !config->thinLTOIndexOnly) {
+    if (args.hasArg(OPT_thinlto_object_suffix_replace_eq))
+      error("--thinlto-object-suffix-replace is not supported with "
+            "--thinlto-emit-index-files");
+    else if (args.hasArg(OPT_thinlto_prefix_replace_eq))
+      error("--thinlto-prefix-replace is not supported with "
+            "--thinlto-emit-index-files");
+  }
+  if (!config->thinLTOPrefixReplaceNativeObject.empty() &&
+      config->thinLTOIndexOnlyArg.empty()) {
+    error("--thinlto-prefix-replace=old_dir;new_dir;obj_dir must be used with "
+          "--thinlto-index-only=");
+  }
   config->runtimePaths = args::getStrings(args, OPT_rpath);
   config->allLoad = args.hasFlag(OPT_all_load, OPT_noall_load, false);
   config->archMultiple = args.hasArg(OPT_arch_multiple);
@@ -1429,13 +1645,15 @@ bool macho::link(ArrayRef<const char *> argsArr, llvm::raw_ostream &stdoutOS,
   config->implicitDylibs = !args.hasArg(OPT_no_implicit_dylibs);
   config->emitFunctionStarts =
       args.hasFlag(OPT_function_starts, OPT_no_function_starts, true);
-  config->emitBitcodeBundle = args.hasArg(OPT_bitcode_bundle);
   config->emitDataInCodeInfo =
       args.hasFlag(OPT_data_in_code_info, OPT_no_data_in_code_info, true);
+  config->emitChainedFixups = shouldEmitChainedFixups(args);
+  config->emitInitOffsets =
+      config->emitChainedFixups || args.hasArg(OPT_init_offsets);
   config->icfLevel = getICFLevel(args);
-  config->dedupLiterals =
-      args.hasFlag(OPT_deduplicate_literals, OPT_icf_eq, false) ||
-      config->icfLevel != ICFLevel::none;
+  config->dedupStrings =
+      args.hasFlag(OPT_deduplicate_strings, OPT_no_deduplicate_strings, true);
+  config->deadStripDuplicates = args.hasArg(OPT_dead_strip_duplicates);
   config->warnDylibInstallName = args.hasFlag(
       OPT_warn_dylib_install_name, OPT_no_warn_dylib_install_name, false);
   config->ignoreOptimizationHints = args.hasArg(OPT_ignore_optimization_hints);
@@ -1445,25 +1663,32 @@ bool macho::link(ArrayRef<const char *> argsArr, llvm::raw_ostream &stdoutOS,
   config->forceExactCpuSubtypeMatch =
       getenv("LD_DYLIB_CPU_SUBTYPES_MUST_MATCH");
   config->objcStubsMode = getObjCStubsMode(args);
+  config->ignoreAutoLink = args.hasArg(OPT_ignore_auto_link);
+  for (const Arg *arg : args.filtered(OPT_ignore_auto_link_option))
+    config->ignoreAutoLinkOptions.insert(arg->getValue());
+  config->strictAutoLink = args.hasArg(OPT_strict_auto_link);
+  config->ltoDebugPassManager = args.hasArg(OPT_lto_debug_pass_manager);
+  config->csProfileGenerate = args.hasArg(OPT_cs_profile_generate);
+  config->csProfilePath = args.getLastArgValue(OPT_cs_profile_path);
+  config->pgoWarnMismatch =
+      args.hasFlag(OPT_pgo_warn_mismatch, OPT_no_pgo_warn_mismatch, true);
+  config->generateUuid = !args.hasArg(OPT_no_uuid);
 
   for (const Arg *arg : args.filtered(OPT_alias)) {
     config->aliasedSymbols.push_back(
         std::make_pair(arg->getValue(0), arg->getValue(1)));
   }
 
-  // FIXME: Add a commandline flag for this too.
-  config->zeroModTime = getenv("ZERO_AR_DATE");
+  if (const char *zero = getenv("ZERO_AR_DATE"))
+    config->zeroModTime = strcmp(zero, "0") != 0;
+  if (args.getLastArg(OPT_reproducible))
+    config->zeroModTime = true;
 
   std::array<PlatformType, 3> encryptablePlatforms{
       PLATFORM_IOS, PLATFORM_WATCHOS, PLATFORM_TVOS};
   config->emitEncryptionInfo =
       args.hasFlag(OPT_encryptable, OPT_no_encryption,
                    is_contained(encryptablePlatforms, config->platform()));
-
-#ifndef LLVM_HAVE_LIBXAR
-  if (config->emitBitcodeBundle)
-    error("-bitcode_bundle unsupported because LLD wasn't built with libxar");
-#endif
 
   if (const Arg *arg = args.getLastArg(OPT_install_name)) {
     if (config->warnDylibInstallName && config->outputType != MH_DYLIB)
@@ -1620,8 +1845,7 @@ bool macho::link(ArrayRef<const char *> argsArr, llvm::raw_ostream &stdoutOS,
 
   config->adhocCodesign = args.hasFlag(
       OPT_adhoc_codesign, OPT_no_adhoc_codesign,
-      (config->arch() == AK_arm64 || config->arch() == AK_arm64e) &&
-          config->platform() == PLATFORM_MACOS);
+      shouldAdhocSignByDefault(config->arch(), config->platform()));
 
   if (args.hasArg(OPT_v)) {
     message(getLLDVersion(), lld::errs());
@@ -1653,11 +1877,6 @@ bool macho::link(ArrayRef<const char *> argsArr, llvm::raw_ostream &stdoutOS,
     initLLVM(); // must be run before any call to addFile()
     createFiles(args);
 
-    config->isPic = config->outputType == MH_DYLIB ||
-                    config->outputType == MH_BUNDLE ||
-                    (config->outputType == MH_EXECUTE &&
-                     args.hasFlag(OPT_pie, OPT_no_pie, true));
-
     // Now that all dylibs have been loaded, search for those that should be
     // re-exported.
     {
@@ -1685,8 +1904,10 @@ bool macho::link(ArrayRef<const char *> argsArr, llvm::raw_ostream &stdoutOS,
       parseClangOption(saver().save("-mcpu=" + StringRef(arg->getValue())),
                        arg->getSpelling());
 
-    for (const Arg *arg : args.filtered(OPT_mllvm))
+    for (const Arg *arg : args.filtered(OPT_mllvm)) {
       parseClangOption(arg->getValue(), arg->getSpelling());
+      config->mllvmOpts.emplace_back(arg->getValue());
+    }
 
     createSyntheticSections();
     createSyntheticSymbols();
@@ -1697,11 +1918,22 @@ bool macho::link(ArrayRef<const char *> argsArr, llvm::raw_ostream &stdoutOS,
     // explicitly exported. Do this before running LTO so that LTO can better
     // optimize.
     handleExplicitExports();
+
+    bool didCompileBitcodeFiles = compileBitcodeFiles();
+
+    resolveLCLinkerOptions();
+
+    // If --thinlto-index-only is given, we should create only "index
+    // files" and not object files. Index file creation is already done
+    // in compileBitcodeFiles, so we are done if that's the case.
+    if (config->thinLTOIndexOnly)
+      return errorCount() == 0;
+
     // LTO may emit a non-hidden (extern) object file symbol even if the
     // corresponding bitcode symbol is hidden. In particular, this happens for
     // cross-module references to hidden symbols under ThinLTO. Thus, if we
     // compiled any bitcode files, we must redo the symbol hiding.
-    if (compileBitcodeFiles())
+    if (didCompileBitcodeFiles)
       handleExplicitExports();
     replaceCommonSymbols();
 
@@ -1718,7 +1950,7 @@ bool macho::link(ArrayRef<const char *> argsArr, llvm::raw_ostream &stdoutOS,
       StringRef segName = arg->getValue(0);
       StringRef sectName = arg->getValue(1);
       StringRef fileName = arg->getValue(2);
-      Optional<MemoryBufferRef> buffer = readFile(fileName);
+      std::optional<MemoryBufferRef> buffer = readFile(fileName);
       if (buffer)
         inputFiles.insert(make<OpaqueFile>(*buffer, segName, sectName));
     }
@@ -1736,6 +1968,9 @@ bool macho::link(ArrayRef<const char *> argsArr, llvm::raw_ostream &stdoutOS,
     if (config->deadStrip)
       markLive();
 
+    if (args.hasArg(OPT_check_category_conflicts))
+      objc::checkCategories();
+
     // ICF assumes that all literals have been folded already, so we must run
     // foldIdenticalLiterals before foldIdenticalSections.
     foldIdenticalLiterals();
@@ -1743,7 +1978,7 @@ bool macho::link(ArrayRef<const char *> argsArr, llvm::raw_ostream &stdoutOS,
       if (config->icfLevel == ICFLevel::safe)
         markAddrSigSymbols();
       foldIdenticalSections(/*onlyCfStrings=*/false);
-    } else if (config->dedupLiterals) {
+    } else if (config->dedupStrings) {
       foldIdenticalSections(/*onlyCfStrings=*/true);
     }
 
@@ -1762,5 +1997,12 @@ bool macho::link(ArrayRef<const char *> argsArr, llvm::raw_ostream &stdoutOS,
 
     timeTraceProfilerCleanup();
   }
+
+  if (errorCount() != 0 || config->strictAutoLink)
+    for (const auto &warning : missingAutolinkWarnings)
+      warn(warning);
+
   return errorCount() == 0;
 }
+} // namespace macho
+} // namespace lld

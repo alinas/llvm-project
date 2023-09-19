@@ -1,23 +1,40 @@
-// RUN: mlir-opt %s --sparse-compiler | \
-// RUN: TENSOR0="%mlir_integration_test_dir/data/wide.mtx" \
-// RUN: mlir-cpu-runner \
-// RUN:  -e entry -entry-point-result=void  \
-// RUN:  -shared-libs=%mlir_integration_test_dir/libmlir_c_runner_utils%shlibext | \
-// RUN: FileCheck %s
+//--------------------------------------------------------------------------------------------------
+// WHEN CREATING A NEW TEST, PLEASE JUST COPY & PASTE WITHOUT EDITS.
 //
-// Do the same run, but now with SIMDization as well. This should not change the outcome.
+// Set-up that's shared across all tests in this directory. In principle, this
+// config could be moved to lit.local.cfg. However, there are downstream users that
+//  do not use these LIT config files. Hence why this is kept inline.
 //
-// RUN: mlir-opt %s --sparse-compiler="vectorization-strategy=2 vl=2" | \
-// RUN: TENSOR0="%mlir_integration_test_dir/data/wide.mtx" \
-// RUN: mlir-cpu-runner \
-// RUN:  -e entry -entry-point-result=void  \
-// RUN:  -shared-libs=%mlir_integration_test_dir/libmlir_c_runner_utils%shlibext | \
-// RUN: FileCheck %s
+// DEFINE: %{sparse_compiler_opts} = enable-runtime-library=true
+// DEFINE: %{sparse_compiler_opts_sve} = enable-arm-sve=true %{sparse_compiler_opts}
+// DEFINE: %{compile} = mlir-opt %s --sparse-compiler="%{sparse_compiler_opts}"
+// DEFINE: %{compile_sve} = mlir-opt %s --sparse-compiler="%{sparse_compiler_opts_sve}"
+// DEFINE: %{run_libs} = -shared-libs=%mlir_c_runner_utils,%mlir_runner_utils
+// DEFINE: %{run_opts} = -e entry -entry-point-result=void
+// DEFINE: %{run} = mlir-cpu-runner %{run_opts} %{run_libs}
+// DEFINE: %{run_sve} = %mcr_aarch64_cmd --march=aarch64 --mattr="+sve" %{run_opts} %{run_libs}
+//
+// DEFINE: %{env} =
+//--------------------------------------------------------------------------------------------------
+
+// REDEFINE: %{env} = TENSOR0="%mlir_src_dir/test/Integration/data/wide.mtx"
+// RUN: %{compile} | env %{env} %{run} | FileCheck %s
+//
+// Do the same run, but now with direct IR generation.
+// REDEFINE: %{sparse_compiler_opts} = enable-runtime-library=false
+// RUN: %{compile} | env %{env} %{run} | FileCheck %s
+//
+// Do the same run, but now with vectorization.
+// REDEFINE: %{sparse_compiler_opts} = enable-runtime-library=false vl=2 reassociate-fp-reductions=true enable-index-optimizations=true
+// RUN: %{compile} | env %{env} %{run} | FileCheck %s
+//
+// Do the same run, but now with  VLA vectorization.
+// RUN: %if mlir_arm_sve_tests %{ %{compile_sve} | env %{env} %{run_sve} | FileCheck %s %}
 
 !Filename = !llvm.ptr<i8>
 
 #SparseMatrix = #sparse_tensor.encoding<{
-  dimLevelType = [ "dense", "compressed" ]
+  map = (d0, d1) -> (d0 : dense, d1 : compressed)
 }>
 
 #spmm = {
@@ -84,7 +101,7 @@ module {
     ^bb0(%i : index, %j : index):
       tensor.yield %i0 : f64
     } : tensor<?x?xf64>
-  
+
     // Call kernel.
     %0 = call @kernel_spmm(%a, %b, %x)
       : (tensor<?x?xf64, #SparseMatrix>, tensor<?x?xf64>, tensor<?x?xf64>) -> tensor<?x?xf64>
@@ -98,6 +115,7 @@ module {
 
     // Release the resources.
     bufferization.dealloc_tensor %a : tensor<?x?xf64, #SparseMatrix>
+
 
     return
   }

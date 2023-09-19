@@ -1,5 +1,5 @@
-! RUN: bbc -emit-fir -o - %s | FileCheck %s
-! RUN: %flang_fc1 -emit-fir -o - %s | FileCheck %s
+! RUN: bbc --use-desc-for-alloc=false -emit-fir -o - %s | FileCheck %s
+! RUN: %flang_fc1 -mllvm --use-desc-for-alloc=false -emit-fir -o - %s | FileCheck %s
 
 ! Simple tests for structured ordered loops with loop-control.
 ! Tests the structure of the loop, storage to index variable and return and 
@@ -24,13 +24,14 @@ subroutine simple_loop
   ! CHECK:   fir.store %[[IV]] to %[[I_REF]] : !fir.ref<i32>
   ! CHECK:   %[[LI_NEXT:.*]] = arith.addi %[[LI]], %[[C1]] : index
   ! CHECK:   %[[STEPCAST:.*]] = fir.convert %[[C1]] : (index) -> i32
-  ! CHECK:   %[[IVINC:.*]] = arith.addi %[[IV]], %[[STEPCAST]] : i32
+  ! CHECK:   %[[IVLOAD:.*]] = fir.load %[[I_REF]] : !fir.ref<i32>
+  ! CHECK:   %[[IVINC:.*]] = arith.addi %[[IVLOAD]], %[[STEPCAST]] : i32
   ! CHECK:  fir.result %[[LI_NEXT]], %[[IVINC]] : index, i32
   ! CHECK: }
   end do
   ! CHECK: fir.store %[[LI_RES]]#1 to %[[I_REF]] : !fir.ref<i32>
   ! CHECK: %[[I:.*]] = fir.load %[[I_REF]] : !fir.ref<i32>
-  ! CHECK: %{{.*}} = fir.call @_FortranAioOutputInteger32(%{{.*}}, %[[I]]) : (!fir.ref<i8>, i32) -> i1
+  ! CHECK: %{{.*}} = fir.call @_FortranAioOutputInteger32(%{{.*}}, %[[I]]) {{.*}}: (!fir.ref<i8>, i32) -> i1
   print *, i
 end subroutine
 
@@ -82,14 +83,16 @@ subroutine nested_loop
       asum = asum + arr(i,j)
       ! CHECK: %[[LJ_NEXT:.*]] = arith.addi %[[LJ]], %[[ST_J]] : index
       ! CHECK: %[[J_STEPCAST:.*]] = fir.convert %[[ST_J]] : (index) -> i32
-      ! CHECK: %[[J_IVINC:.*]] = arith.addi %[[J_IV]], %[[J_STEPCAST]] : i32
+      ! CHECK: %[[J_IVLOAD:.*]] = fir.load %[[J_REF]] : !fir.ref<i32>
+      ! CHECK: %[[J_IVINC:.*]] = arith.addi %[[J_IVLOAD]], %[[J_STEPCAST]] : i32
       ! CHECK: fir.result %[[LJ_NEXT]], %[[J_IVINC]] : index, i32
     ! CHECK: }
     end do
     ! CHECK: fir.store %[[J_RES]]#1 to %[[J_REF]] : !fir.ref<i32>
     ! CHECK: %[[LI_NEXT:.*]] = arith.addi %[[LI]], %[[ST_I]] : index
     ! CHECK: %[[I_STEPCAST:.*]] = fir.convert %[[ST_I]] : (index) -> i32
-    ! CHECK: %[[I_IVINC:.*]] = arith.addi %[[I_IV]], %[[I_STEPCAST]] : i32
+    ! CHECK: %[[I_IVLOAD:.*]] = fir.load %[[I_REF]] : !fir.ref<i32>
+    ! CHECK: %[[I_IVINC:.*]] = arith.addi %[[I_IVLOAD]], %[[I_STEPCAST]] : i32
     ! CHECK: fir.result %[[LI_NEXT]], %[[I_IVINC]] : index, i32
   ! CHECK: }
   end do
@@ -116,7 +119,8 @@ subroutine down_counting_loop()
   ! CHECK: fir.store %[[I_IV]] to %[[I_REF]] : !fir.ref<i32>
   ! CHECK: %[[LI_NEXT:.*]] = arith.addi %[[LI]], %[[CMINUS1_STEP_CVT]] : index
   ! CHECK: %[[I_STEPCAST:.*]] = fir.convert %[[CMINUS1_STEP_CVT]] : (index) -> i32
-  ! CHECK: %[[I_IVINC:.*]] = arith.addi %[[I_IV]], %[[I_STEPCAST]] : i32
+  ! CHECK: %[[I_IVLOAD:.*]] = fir.load %[[I_REF]] : !fir.ref<i32>
+  ! CHECK: %[[I_IVINC:.*]] = arith.addi %[[I_IVLOAD]], %[[I_STEPCAST]] : i32
   ! CHECK: fir.result %[[LI_NEXT]], %[[I_IVINC]] : index, i32
   ! CHECK: }
   end do
@@ -142,7 +146,8 @@ subroutine loop_with_variable_step(s,e,st)
   ! CHECK:  fir.store %[[I_IV]] to %[[I_REF]] : !fir.ref<i32>
   ! CHECK:  %[[LI_NEXT:.*]] = arith.addi %[[LI]], %[[ST_CVT]] : index
   ! CHECK: %[[I_STEPCAST:.*]] = fir.convert %[[ST_CVT]] : (index) -> i32
-  ! CHECK: %[[I_IVINC:.*]] = arith.addi %[[I_IV]], %[[I_STEPCAST]] : i32
+  ! CHECK: %[[I_IVLOAD:.*]] = fir.load %[[I_REF]] : !fir.ref<i32>
+  ! CHECK: %[[I_IVINC:.*]] = arith.addi %[[I_IVLOAD]], %[[I_STEPCAST]] : i32
   ! CHECK:  fir.result %[[LI_NEXT]], %[[I_IVINC]] : index, i32
   ! CHECK: }
   end do
@@ -193,7 +198,8 @@ subroutine loop_with_pointer_variables(s,e,st)
 ! CHECK:    fir.store %[[I_IV]] to %[[I_PTR]] : !fir.ptr<i32>
 ! CHECK:    %[[LI_NEXT:.*]] = arith.addi %[[LI]], %[[ST_CVT]] : index
 ! CHECK:    %[[I_STEPCAST:.*]] = fir.convert %[[ST_CVT]] : (index) -> i32
-! CHECK:    %[[I_IVINC:.*]] = arith.addi %[[I_IV]], %[[I_STEPCAST]] : i32
+! CHECK:    %[[I_IVLOAD:.*]] = fir.load %[[I_PTR]] : !fir.ptr<i32>
+! CHECK:    %[[I_IVINC:.*]] = arith.addi %[[I_IVLOAD]], %[[I_STEPCAST]] : i32
 ! CHECK:    fir.result %[[LI_NEXT]], %[[I_IVINC]] : index, i32
   end do
 ! CHECK:  }
@@ -222,7 +228,8 @@ subroutine loop_with_non_default_integer(s,e,st)
     ! CHECK: fir.store %[[I_IV]] to %[[I_REF]] : !fir.ref<i64>
     ! CHECK: %[[LI_NEXT:.*]] = arith.addi %[[LI]], %[[ST_CVT]] : index
     ! CHECK: %[[I_STEPCAST:.*]] = fir.convert %[[ST_CVT]] : (index) -> i64
-    ! CHECK: %[[I_IVINC:.*]] = arith.addi %[[I_IV]], %[[I_STEPCAST]] : i64
+    ! CHECK: %[[I_IVLOAD:.*]] = fir.load %[[I_REF]] : !fir.ref<i64>
+    ! CHECK: %[[I_IVINC:.*]] = arith.addi %[[I_IVLOAD]], %[[I_STEPCAST]] : i64
     ! CHECK: fir.result %[[LI_NEXT]], %[[I_IVINC]] : index, i64
   end do
   ! CHECK: }
@@ -240,9 +247,9 @@ subroutine loop_with_real_control(s,e,st)
   ! CHECK-DAG: %[[ST:.*]] = fir.load %[[ST_REF]] : !fir.ref<f32>
   real :: x, s, e, st
 
-  ! CHECK: %[[DIFF:.*]] = arith.subf %[[E]], %[[S]] : f32
-  ! CHECK: %[[RANGE:.*]] = arith.addf %[[DIFF]], %[[ST]] : f32
-  ! CHECK: %[[HIGH:.*]] = arith.divf %[[RANGE]], %[[ST]] : f32
+  ! CHECK: %[[DIFF:.*]] = arith.subf %[[E]], %[[S]] {{.*}}: f32
+  ! CHECK: %[[RANGE:.*]] = arith.addf %[[DIFF]], %[[ST]] {{.*}}: f32
+  ! CHECK: %[[HIGH:.*]] = arith.divf %[[RANGE]], %[[ST]] {{.*}}: f32
   ! CHECK: %[[HIGH_INDEX:.*]] = fir.convert %[[HIGH]] : (f32) -> index
   ! CHECK: fir.store %[[HIGH_INDEX]] to %[[INDEX_REF]] : !fir.ref<index>
   ! CHECK: fir.store %[[S]] to %[[X_REF]] : !fir.ref<f32>
@@ -260,7 +267,7 @@ subroutine loop_with_real_control(s,e,st)
     ! CHECK: %[[INC:.*]] = arith.subi %[[INDEX2]], %[[C1]] : index
     ! CHECK: fir.store %[[INC]] to %[[INDEX_REF]] : !fir.ref<index>
     ! CHECK: %[[X2:.*]] = fir.load %[[X_REF]] : !fir.ref<f32>
-    ! CHECK: %[[XINC:.*]] = arith.addf %[[X2]], %[[ST]] : f32
+    ! CHECK: %[[XINC:.*]] = arith.addf %[[X2]], %[[ST]] {{.*}}: f32
     ! CHECK: fir.store %[[XINC]] to %[[X_REF]] : !fir.ref<f32>
     ! CHECK: br ^[[HDR]]
   end do

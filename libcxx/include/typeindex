@@ -51,12 +51,6 @@ struct hash<type_index>
 #include <typeinfo>
 #include <version>
 
-#ifndef _LIBCPP_REMOVE_TRANSITIVE_INCLUDES
-#  include <iosfwd>
-#  include <new>
-#  include <utility>
-#endif
-
 // standard-mandated includes
 #include <compare>
 
@@ -93,7 +87,7 @@ public:
     _LIBCPP_INLINE_VISIBILITY
     bool operator>=(const type_index& __y) const _NOEXCEPT
         {return !__t_->before(*__y.__t_);}
-#if _LIBCPP_STD_VER > 17
+#if _LIBCPP_STD_VER >= 20
     _LIBCPP_HIDE_FROM_ABI
     strong_ordering operator<=>(const type_index& __y) const noexcept {
       if (*__t_ == *__y.__t_)
@@ -122,5 +116,11 @@ struct _LIBCPP_TEMPLATE_VIS hash<type_index>
 };
 
 _LIBCPP_END_NAMESPACE_STD
+
+#if !defined(_LIBCPP_REMOVE_TRANSITIVE_INCLUDES) && _LIBCPP_STD_VER <= 20
+#  include <iosfwd>
+#  include <new>
+#  include <utility>
+#endif
 
 #endif // _LIBCPP_TYPEINDEX

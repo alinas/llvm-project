@@ -1,13 +1,16 @@
 include_directories(
   ${LLVM_MAIN_SRC_DIR}/lib/Target/Mips
-  ${LLVM_LIBRARY_DIR}/Target/Mips
+  ${LLVM_BINARY_DIR}/lib/Target/Mips
   )
 
 set(LLVM_LINK_COMPONENTS
-  Mips
-  Exegesis
+  CodeGenTypes
   Core
+  Exegesis
+  MC
+  Mips
   Support
+  TargetParser
   )
 
 add_llvm_library(LLVMExegesisMips

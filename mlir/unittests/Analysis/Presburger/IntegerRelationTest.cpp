@@ -7,7 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Analysis/Presburger/IntegerRelation.h"
-#include "./Utils.h"
+#include "Parser.h"
 #include "mlir/Analysis/Presburger/Simplex.h"
 
 #include <gmock/gmock.h>
@@ -16,14 +16,6 @@
 using namespace mlir;
 using namespace presburger;
 
-static IntegerRelation parseRelationFromSet(StringRef set, unsigned numDomain) {
-  IntegerRelation rel = parsePoly(set);
-
-  rel.convertVarKind(VarKind::SetDim, 0, numDomain, VarKind::Domain);
-
-  return rel;
-}
-
 TEST(IntegerRelationTest, getDomainAndRangeSet) {
   IntegerRelation rel = parseRelationFromSet(
       "(x, xr)[N] : (xr - x - 10 == 0, xr >= 0, N - xr >= 0)", 1);
@@ -31,14 +23,14 @@ TEST(IntegerRelationTest, getDomainAndRangeSet) {
   IntegerPolyhedron domainSet = rel.getDomainSet();
 
   IntegerPolyhedron expectedDomainSet =
-      parsePoly("(x)[N] : (x + 10 >= 0, N - x - 10 >= 0)");
+      parseIntegerPolyhedron("(x)[N] : (x + 10 >= 0, N - x - 10 >= 0)");
 
   EXPECT_TRUE(domainSet.isEqual(expectedDomainSet));
 
   IntegerPolyhedron rangeSet = rel.getRangeSet();
 
   IntegerPolyhedron expectedRangeSet =
-      parsePoly("(x)[N] : (x >= 0, N - x >= 0)");
+      parseIntegerPolyhedron("(x)[N] : (x >= 0, N - x >= 0)");
 
   EXPECT_TRUE(rangeSet.isEqual(expectedRangeSet));
 }
@@ -66,7 +58,8 @@ TEST(IntegerRelationTest, intersectDomainAndRange) {
       1);
 
   {
-    IntegerPolyhedron poly = parsePoly("(x)[N, M] : (x >= 0, M - x - 1 >= 0)");
+    IntegerPolyhedron poly =
+        parseIntegerPolyhedron("(x)[N, M] : (x >= 0, M - x - 1 >= 0)");
 
     IntegerRelation expectedRel = parseRelationFromSet(
         "(x, y, z)[N, M]: (y floordiv 2 - N >= 0, z floordiv 5 - M"
@@ -79,8 +72,8 @@ TEST(IntegerRelationTest, intersectDomainAndRange) {
   }
 
   {
-    IntegerPolyhedron poly =
-        parsePoly("(y, z)[N, M] : (y >= 0, M - y - 1 >= 0, y + z == 0)");
+    IntegerPolyhedron poly = parseIntegerPolyhedron(
+        "(y, z)[N, M] : (y >= 0, M - y - 1 >= 0, y + z == 0)");
 
     IntegerRelation expectedRel = parseRelationFromSet(
         "(x, y, z)[N, M]: (y floordiv 2 - N >= 0, z floordiv 5 - M"
@@ -125,18 +118,52 @@ TEST(IntegerRelationTest, applyDomainAndRange) {
 }
 
 TEST(IntegerRelationTest, symbolicLexmin) {
-  SymbolicLexMin lexmin =
+  SymbolicLexOpt lexmin =
       parseRelationFromSet("(a, x)[b] : (x - a >= 0, x - b >= 0)", 1)
           .findSymbolicIntegerLexMin();
 
-  PWMAFunction expectedLexmin =
-      parsePWMAF(/*numInputs=*/2,
-                 /*numOutputs=*/1,
-                 {
-                     {"(a)[b] : (a - b >= 0)", {{1, 0, 0}}},     // a
-                     {"(a)[b] : (b - a - 1 >= 0)", {{0, 1, 0}}}, // b
-                 },
-                 /*numSymbols=*/1);
+  PWMAFunction expectedLexmin = parsePWMAF({
+      {"(a)[b] : (a - b >= 0)", "(a)[b] -> (a)"},     // a
+      {"(a)[b] : (b - a - 1 >= 0)", "(a)[b] -> (b)"}, // b
+  });
   EXPECT_TRUE(lexmin.unboundedDomain.isIntegerEmpty());
-  EXPECT_TRUE(lexmin.lexmin.isEqual(expectedLexmin));
+  EXPECT_TRUE(lexmin.lexopt.isEqual(expectedLexmin));
+}
+
+TEST(IntegerRelationTest, symbolicLexmax) {
+  SymbolicLexOpt lexmax1 =
+      parseRelationFromSet("(a, x)[b] : (a - x >= 0, b - x >= 0)", 1)
+          .findSymbolicIntegerLexMax();
+
+  PWMAFunction expectedLexmax1 = parsePWMAF({
+      {"(a)[b] : (a - b >= 0)", "(a)[b] -> (b)"},
+      {"(a)[b] : (b - a - 1 >= 0)", "(a)[b] -> (a)"},
+  });
+
+  SymbolicLexOpt lexmax2 =
+      parseRelationFromSet("(i, j)[N] : (i >= 0, j >= 0, N - i - j >= 0)", 1)
+          .findSymbolicIntegerLexMax();
+
+  PWMAFunction expectedLexmax2 = parsePWMAF({
+      {"(i)[N] : (i >= 0, N - i >= 0)", "(i)[N] -> (N - i)"},
+  });
+
+  SymbolicLexOpt lexmax3 =
+      parseRelationFromSet("(x, y)[N] : (x >= 0, 2 * N - x >= 0, y >= 0, x - y "
+                           "+ 2 * N >= 0, 4 * N - x - y >= 0)",
+                           1)
+          .findSymbolicIntegerLexMax();
+
+  PWMAFunction expectedLexmax3 =
+      parsePWMAF({{"(x)[N] : (x >= 0, 2 * N - x >= 0, x - N - 1 >= 0)",
+                   "(x)[N] -> (4 * N - x)"},
+                  {"(x)[N] : (x >= 0, 2 * N - x >= 0, -x + N >= 0)",
+                   "(x)[N] -> (x + 2 * N)"}});
+
+  EXPECT_TRUE(lexmax1.unboundedDomain.isIntegerEmpty());
+  EXPECT_TRUE(lexmax1.lexopt.isEqual(expectedLexmax1));
+  EXPECT_TRUE(lexmax2.unboundedDomain.isIntegerEmpty());
+  EXPECT_TRUE(lexmax2.lexopt.isEqual(expectedLexmax2));
+  EXPECT_TRUE(lexmax3.unboundedDomain.isIntegerEmpty());
+  EXPECT_TRUE(lexmax3.lexopt.isEqual(expectedLexmax3));
 }

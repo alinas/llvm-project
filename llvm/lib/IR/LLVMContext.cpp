@@ -87,6 +87,16 @@ LLVMContext::LLVMContext() : pImpl(new LLVMContextImpl(*this)) {
          "ptrauth operand bundle id drifted!");
   (void)PtrauthEntry;
 
+  auto *KCFIEntry = pImpl->getOrInsertBundleTag("kcfi");
+  assert(KCFIEntry->second == LLVMContext::OB_kcfi &&
+         "kcfi operand bundle id drifted!");
+  (void)KCFIEntry;
+
+  auto *ConvergenceCtrlEntry = pImpl->getOrInsertBundleTag("convergencectrl");
+  assert(ConvergenceCtrlEntry->second == LLVMContext::OB_convergencectrl &&
+         "convergencectrl operand bundle id drifted!");
+  (void)ConvergenceCtrlEntry;
+
   SyncScope::ID SingleThreadSSID =
       pImpl->getOrInsertSyncScopeID("singlethread");
   assert(SingleThreadSSID == SyncScope::SingleThread &&
@@ -135,7 +145,7 @@ bool LLVMContext::getDiagnosticsHotnessRequested() const {
   return pImpl->DiagnosticsHotnessRequested;
 }
 
-void LLVMContext::setDiagnosticsHotnessThreshold(Optional<uint64_t> Threshold) {
+void LLVMContext::setDiagnosticsHotnessThreshold(std::optional<uint64_t> Threshold) {
   pImpl->DiagnosticsHotnessThreshold = Threshold;
 }
 void LLVMContext::setMisExpectWarningRequested(bool Requested) {
@@ -148,7 +158,7 @@ uint64_t LLVMContext::getDiagnosticsHotnessThreshold() const {
   return pImpl->DiagnosticsHotnessThreshold.value_or(UINT64_MAX);
 }
 void LLVMContext::setDiagnosticsMisExpectTolerance(
-    Optional<uint32_t> Tolerance) {
+    std::optional<uint32_t> Tolerance) {
   pImpl->DiagnosticsMisExpectTolerance = Tolerance;
 }
 uint32_t LLVMContext::getDiagnosticsMisExpectTolerance() const {
@@ -363,14 +373,10 @@ std::unique_ptr<DiagnosticHandler> LLVMContext::getDiagnosticHandler() {
   return std::move(pImpl->DiagHandler);
 }
 
-bool LLVMContext::hasSetOpaquePointersValue() const {
-  return pImpl->hasOpaquePointersValue();
-}
-
 void LLVMContext::setOpaquePointers(bool Enable) const {
-  pImpl->setOpaquePointers(Enable);
+  assert(Enable && "Cannot disable opaque pointers");
 }
 
 bool LLVMContext::supportsTypedPointers() const {
-  return !pImpl->getOpaquePointers();
+  return false;
 }

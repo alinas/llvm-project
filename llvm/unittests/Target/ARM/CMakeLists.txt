@@ -1,6 +1,6 @@
 include_directories(
   ${LLVM_MAIN_SRC_DIR}/lib/Target/ARM
-  ${LLVM_LIBRARY_DIR}/Target/ARM
+  ${LLVM_BINARY_DIR}/lib/Target/ARM
   )
 
 set(LLVM_LINK_COMPONENTS
@@ -8,6 +8,7 @@ set(LLVM_LINK_COMPONENTS
   ARMDesc
   ARMInfo
   CodeGen
+  CodeGenTypes
   Core
   GlobalISel
   MC
@@ -15,7 +16,8 @@ set(LLVM_LINK_COMPONENTS
   SelectionDAG
   Support
   Target
-)
+  TargetParser
+  )
 
 add_llvm_target_unittest(ARMTests
   MachineInstrTest.cpp

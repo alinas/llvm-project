@@ -1,7 +1,7 @@
 // RUN: mlir-opt -allow-unregistered-dialect %s -split-input-file -verify-diagnostics
 
 func.func @elementsattr_non_tensor_type() -> () {
-  "foo"(){bar = dense<[4]> : i32} : () -> () // expected-error {{elements literal must be a ranked tensor or vector type}}
+  "foo"(){bar = dense<[4]> : i32} : () -> () // expected-error {{elements literal must be a shaped type}}
 }
 
 // -----
@@ -521,3 +521,69 @@ func.func @duplicate_dictionary_attr_key() {
 
 // expected-error@+1 {{`dense_resource` expected a shaped type}}
 #attr = dense_resource<resource> : i32
+
+// -----
+
+// expected-error@below {{expected '<' after 'array'}}
+#attr = array
+
+// -----
+
+// expected-error@below {{expected integer or float type}}
+#attr = array<vector<i32>>
+
+// -----
+
+// expected-error@below {{element type bitwidth must be a multiple of 8}}
+#attr = array<i7>
+
+// -----
+
+// expected-error@below {{expected ':' after dense array type}}
+#attr = array<i8)
+
+// -----
+
+// expected-error@below {{expected '>' to close an array attribute}}
+#attr = array<i8: 1)
+
+// -----
+
+// expected-error@below {{expected '[' after 'distinct'}}
+#attr = distinct<
+
+// -----
+
+// expected-error@below {{expected distinct ID}}
+#attr = distinct[i8
+
+// -----
+
+// expected-error@below {{expected an unsigned 64-bit integer}}
+#attr = distinct[0xAAAABBBBEEEEFFFF1]
+
+// -----
+
+// expected-error@below {{expected ']' to close distinct ID}}
+#attr = distinct[8)
+
+// -----
+
+// expected-error@below {{expected '<' after distinct ID}}
+#attr = distinct[8](
+
+// -----
+
+// expected-error@below {{expected attribute}}
+#attr = distinct[8]<attribute
+
+// -----
+
+// expected-error@below {{expected '>' to close distinct attribute}}
+#attr = distinct[8]<@foo]
+
+// -----
+
+#attr = distinct[0]<42 : i32>
+// expected-error@below {{referenced attribute does not match previous definition: 42 : i32}}
+#attr1 = distinct[0]<43 : i32>

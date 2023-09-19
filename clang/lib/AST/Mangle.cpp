@@ -133,10 +133,6 @@ bool MangleContext::shouldMangleDeclName(const NamedDecl *D) {
   if (isa<MSGuidDecl>(D))
     return true;
 
-  // HLSL shader entry function never need to be mangled.
-  if (getASTContext().getLangOpts().HLSL && D->hasAttr<HLSLShaderAttr>())
-    return false;
-
   return shouldMangleCXXName(D);
 }
 
@@ -202,8 +198,12 @@ void MangleContext::mangleName(GlobalDecl GD, raw_ostream &Out) {
     Out << '_';
   else if (CC == CCM_Fast)
     Out << '@';
-  else if (CC == CCM_RegCall)
-    Out << "__regcall3__";
+  else if (CC == CCM_RegCall) {
+    if (getASTContext().getLangOpts().RegCall4)
+      Out << "__regcall4__";
+    else
+      Out << "__regcall3__";
+  }
 
   if (!MCXX)
     Out << D->getIdentifier()->getName();
@@ -227,6 +227,7 @@ void MangleContext::mangleName(GlobalDecl GD, raw_ostream &Out) {
   if (const CXXMethodDecl *MD = dyn_cast<CXXMethodDecl>(FD))
     if (!MD->isStatic())
       ++ArgWords;
+  uint64_t DefaultPtrWidth = TI.getPointerWidth(LangAS::Default);
   for (const auto &AT : Proto->param_types()) {
     // If an argument type is incomplete there is no way to get its size to
     // correctly encode into the mangling scheme.
@@ -234,11 +235,10 @@ void MangleContext::mangleName(GlobalDecl GD, raw_ostream &Out) {
     if (AT->isIncompleteType())
       break;
     // Size should be aligned to pointer size.
-    ArgWords +=
-        llvm::alignTo(ASTContext.getTypeSize(AT), TI.getPointerWidth(0)) /
-        TI.getPointerWidth(0);
+    ArgWords += llvm::alignTo(ASTContext.getTypeSize(AT), DefaultPtrWidth) /
+                DefaultPtrWidth;
   }
-  Out << ((TI.getPointerWidth(0) / 8) * ArgWords);
+  Out << ((DefaultPtrWidth / 8) * ArgWords);
 }
 
 void MangleContext::mangleMSGuidDecl(const MSGuidDecl *GD, raw_ostream &Out) {

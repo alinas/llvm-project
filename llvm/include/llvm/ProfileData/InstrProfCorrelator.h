@@ -16,6 +16,8 @@
 #include "llvm/ProfileData/InstrProf.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/YAMLTraits.h"
+#include <optional>
 #include <vector>
 
 namespace llvm {
@@ -34,16 +36,29 @@ public:
 
   /// Construct a ProfileData vector used to correlate raw instrumentation data
   /// to their functions.
-  virtual Error correlateProfileData() = 0;
+  /// \param MaxWarnings the maximum number of warnings to emit (0 = no limit)
+  virtual Error correlateProfileData(int MaxWarnings) = 0;
+
+  virtual Error correlateCovUnusedFuncNames(int MaxWarnings) = 0;
+
+  /// Process debug info and dump the correlation data.
+  /// \param MaxWarnings the maximum number of warnings to emit (0 = no limit)
+  virtual Error dumpYaml(int MaxWarnings, raw_ostream &OS) = 0;
 
   /// Return the number of ProfileData elements.
-  llvm::Optional<size_t> getDataSize() const;
+  std::optional<size_t> getDataSize() const;
 
   /// Return a pointer to the names string that this class constructs.
   const char *getNamesPointer() const { return Names.c_str(); }
 
   /// Return the number of bytes in the names string.
   size_t getNamesSize() const { return Names.size(); }
+
+  const char *getCovUnusedFuncNamesPointer() const {
+    return CovUnusedFuncNames.c_str();
+  }
+
+  size_t getCovUnusedFuncNamesSize() const { return CovUnusedFuncNames.size(); }
 
   /// Return the size of the counters section in bytes.
   uint64_t getCountersSectionSize() const {
@@ -53,6 +68,7 @@ public:
   static const char *FunctionNameAttributeName;
   static const char *CFGHashAttributeName;
   static const char *NumCountersAttributeName;
+  static const char *CovFunctionNameAttributeName;
 
   enum InstrProfCorrelatorKind { CK_32Bit, CK_64Bit };
   InstrProfCorrelatorKind getKind() const { return Kind; }
@@ -69,13 +85,32 @@ protected:
     /// True if target and host have different endian orders.
     bool ShouldSwapBytes;
   };
-  const std::unique_ptr<InstrProfCorrelator::Context> Ctx;
+  const std::unique_ptr<Context> Ctx;
 
   InstrProfCorrelator(InstrProfCorrelatorKind K, std::unique_ptr<Context> Ctx)
       : Ctx(std::move(Ctx)), Kind(K) {}
 
   std::string Names;
   std::vector<std::string> NamesVec;
+  std::string CovUnusedFuncNames;
+
+  struct Probe {
+    std::string FunctionName;
+    std::optional<std::string> LinkageName;
+    yaml::Hex64 CFGHash;
+    yaml::Hex64 CounterOffset;
+    uint32_t NumCounters;
+    std::optional<std::string> FilePath;
+    std::optional<int> LineNumber;
+  };
+
+  struct CorrelationData {
+    std::vector<Probe> Probes;
+  };
+
+  friend struct yaml::MappingTraits<Probe>;
+  friend struct yaml::SequenceElementTraits<Probe>;
+  friend struct yaml::MappingTraits<CorrelationData>;
 
 private:
   static llvm::Expected<std::unique_ptr<InstrProfCorrelator>>
@@ -108,8 +143,12 @@ public:
 protected:
   std::vector<RawInstrProf::ProfileData<IntPtrT>> Data;
 
-  Error correlateProfileData() override;
-  virtual void correlateProfileDataImpl() = 0;
+  Error correlateProfileData(int MaxWarnings) override;
+  virtual void correlateProfileDataImpl(
+      int MaxWarnings,
+      InstrProfCorrelator::CorrelationData *Data = nullptr) = 0;
+
+  Error dumpYaml(int MaxWarnings, raw_ostream &OS) override;
 
   void addProbe(StringRef FunctionName, uint64_t CFGHash, IntPtrT CounterOffset,
                 IntPtrT FunctionPtr, uint32_t NumCounters);
@@ -140,7 +179,7 @@ private:
   std::unique_ptr<DWARFContext> DICtx;
 
   /// Return the address of the object that the provided DIE symbolizes.
-  llvm::Optional<uint64_t> getLocation(const DWARFDie &Die) const;
+  std::optional<uint64_t> getLocation(const DWARFDie &Die) const;
 
   /// Returns true if the provided DIE symbolizes an instrumentation probe
   /// symbol.
@@ -171,7 +210,13 @@ private:
   ///       NULL
   ///     NULL
   /// \endcode
-  void correlateProfileDataImpl() override;
+  /// \param MaxWarnings the maximum number of warnings to emit (0 = no limit)
+  /// \param Data if provided, populate with the correlation data found
+  void correlateProfileDataImpl(
+      int MaxWarnings,
+      InstrProfCorrelator::CorrelationData *Data = nullptr) override;
+
+  Error correlateCovUnusedFuncNames(int MaxWarnings) override;
 };
 
 } // end namespace llvm
